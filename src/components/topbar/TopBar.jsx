@@ -53,8 +53,9 @@ export function TopBar() {
 
   const isMuted = volume === 0
 
-  //Dummy value for now. This should be read-only, unless the device is the first
-  const bpm = 120
+  // BPM state (can be made editable later)
+  const bpm = 60
+
 
   const toggleMute = () => {
     if (isMuted) {
