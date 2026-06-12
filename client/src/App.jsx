@@ -4,6 +4,7 @@ import { NoteSpace } from './components/notespace/NoteSpace'
 import { DrumSpace } from './components/notespace/DrumSpace'
 import { ControlPanel } from './components/ControlPanel'
 import * as ctx from './contexts/snaptunestatecontext'
+import { VirtualRoom, ServerSocketService } from 'simsnap-core'
 import './App.css'
 
 function App() {
@@ -20,7 +21,33 @@ function App() {
   // One measure = 4 beats, so two measures = 8 beats
   const getTotalMs = () => (8 / (bpm / 60)) * 1000
 
+
   useEffect(() => {
+
+    // Initialize connection
+ServerSocketService.InitConnection(
+  'ROOM_SHARED',           // room code
+  window.location.hostname,         // server IP
+  4000,               // server port
+  window.innerWidth,   // client screen width
+  window.innerHeight,  // client screen height
+  true               // use HTTP (true for HTTPS)
+);
+
+// Listen for connection events
+ServerSocketService.addEventListener('connect', () => {
+  console.log('Connected to SimSnap server');
+});
+
+ServerSocketService.addEventListener('clientSize', (event) => {
+  console.log('📐 Screen size sent:', event.width, 'x', event.height);
+});
+
+// Handle disconnection
+window.addEventListener('beforeunload', () => {
+  ServerSocketService.emit('destroy', undefined);
+});
+
     if (playback === 1) {
       startTimeRef.current = performance.now() - progressRef.current * getTotalMs()
 
@@ -63,11 +90,11 @@ function App() {
     >
       <ctx.DrawStateContextProvider>
         <ctx.UndoContextProvider>
-            <ctx.SFXContextProvider>
-                <TopBar />
-                {instrument === 3 ? <DrumSpace progressRef={progressRef} /> : <NoteSpace progressRef={progressRef} />}
-                <ControlPanel />
-            </ctx.SFXContextProvider>
+          <ctx.SFXContextProvider>
+            <TopBar />
+            {instrument === 3 ? <DrumSpace progressRef={progressRef} /> : <NoteSpace progressRef={progressRef} />}
+            <ControlPanel />
+          </ctx.SFXContextProvider>
         </ctx.UndoContextProvider>
       </ctx.DrawStateContextProvider>
     </div>

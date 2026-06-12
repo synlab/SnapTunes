@@ -1,14 +1,20 @@
+import { Server } from 'socket.io';
+import { 
+  ServerMultiRoom, 
+  RoomSocketService, 
+  ClientSocketService, 
+  VirtualRoom
+} from 'simsnap-core';
+
 import express from 'express';
 import https from 'https';
 import fs from 'fs';
-import { Server } from 'socket.io';
-import os from 'os';
 import cors from 'cors';
 
 const app = express();
 app.use(cors()); // Enable CORS for all routes
 
-// // Read SSL certificates
+// Read SSL certificates
 const privateKey = fs.readFileSync('credentials/key.pem', 'utf8');
 const certificate = fs.readFileSync('credentials/cert.pem', 'utf8');
 const credentials = { key: privateKey, cert: certificate };
@@ -23,24 +29,36 @@ const ioServer = new Server(server, {
 
 const port = 4000;
 
-// Initialize the game server
-// const gameServer = new SimpleServerMultiRoom(ioServer);
-console.log('🎮 Game server initialized');
-
 // Simple route
 app.get('/', (req, res) => {
     res.send('Server is working!');
 });
 
+const virtualRoom = new VirtualRoom();
+// Create multi-room manager
+const multiRoom = new ServerMultiRoom(
+  ioServer,
+  // Room factory function
+  (roomCode: string) => new RoomSocketService(
+    roomCode,
+    ioServer,
+    undefined, // Will create default VirtualRoom
+    (socket) => new ClientSocketService(socket, virtualRoom)
+  ),
+  // Room code extractor
+  (socket) => socket.handshake.query.room as string
+);
+
+
 server.listen(port, () => {
     console.log(`🚀 Simple Snap Server listening on https://localhost:${port}`);
+});
 
-    const interfaces = os.networkInterfaces();
-    Object.values(interfaces).forEach((iface) => {
-        iface?.forEach((info) => {
-            if (info.family === 'IPv4' && !info.internal) {
-                console.log(`🔌 Socket.io via: wss://${info.address}:${port}`);
-            }
-        });
-    });
+// Optional: Handle server events
+ioServer.on('connection', (socket) => {
+  console.log(`Client connected: ${socket.id}`);
+  
+  socket.on('disconnect', () => {
+    console.log(`Client disconnected: ${socket.id}`);
+  });
 });
