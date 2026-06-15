@@ -1,8 +1,8 @@
 import { Server } from 'socket.io';
-import { 
-  ServerMultiRoom, 
-  RoomSocketService, 
-  ClientSocketService, 
+import {
+  ServerMultiRoom,
+  RoomSocketService,
+  ClientSocketService,
   VirtualRoom
 } from 'simsnap-core';
 
@@ -10,6 +10,7 @@ import express from 'express';
 import https from 'https';
 import fs from 'fs';
 import cors from 'cors';
+import { eventNames } from 'process';
 
 const app = express();
 app.use(cors()); // Enable CORS for all routes
@@ -21,17 +22,17 @@ const credentials = { key: privateKey, cert: certificate };
 
 const server = https.createServer(credentials, app);
 const ioServer = new Server(server, {
-    cors: {
-        origin: "*", // Allow requests from any origin
-        methods: ["GET", "POST"]
-    }
+  cors: {
+    origin: "*", // Allow requests from any origin
+    methods: ["GET", "POST"]
+  }
 });
 
 const port = 4000;
 
 // Simple route
 app.get('/', (req, res) => {
-    res.send('Server is working!');
+  res.send('Server is working!');
 });
 
 const virtualRoom = new VirtualRoom();
@@ -51,14 +52,28 @@ const multiRoom = new ServerMultiRoom(
 
 
 server.listen(port, () => {
-    console.log(`🚀 Simple Snap Server listening on https://localhost:${port}`);
+  console.log(`🚀 Simple Snap Server listening on https://localhost:${port}`);
 });
 
 // Optional: Handle server events
 ioServer.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`);
-  
+
   socket.on('disconnect', () => {
     console.log(`Client disconnected: ${socket.id}`);
   });
+
+  virtualRoom.addEventListener('snapDevices', (event) => {
+    console.log('Devices ' +  event.event1.device.id.value + ' and ' +  event.event2.device.id.value + ' snapped at position ' + event.event1.position +' and ' + event.event2.position);
+    
+    socket.emit("snapDevices", event);
+  });
+
+  virtualRoom.addEventListener('unSnapDevices', (event) => {
+    console.log('Devices ' +  event.event1.device.id.value + ' and ' +  event.event2.device.id.value + ' unsnapped from position ' + event.event1.position +' and ' + event.event2.position);
+    
+
+  });
+
+
 });

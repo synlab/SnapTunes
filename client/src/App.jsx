@@ -25,28 +25,55 @@ function App() {
   useEffect(() => {
 
     // Initialize connection
-ServerSocketService.InitConnection(
-  'ROOM_SHARED',           // room code
-  window.location.hostname,         // server IP
-  4000,               // server port
-  window.innerWidth,   // client screen width
-  window.innerHeight,  // client screen height
-  true               // use HTTP (true for HTTPS)
-);
+    ServerSocketService.InitConnection(
+      'ROOM_SHARED',           // room code
+      window.location.hostname,         // server IP
+      4000,               // server port
+      window.innerWidth,   // client screen width
+      window.innerHeight,  // client screen height
+      true               // use HTTP (true for HTTPS)
+    );
 
-// Listen for connection events
-ServerSocketService.addEventListener('connect', () => {
-  console.log('Connected to SimSnap server');
-});
+    // Listen for connection events
+    ServerSocketService.addEventListener('connect', () => {
+      console.log('Connected to SimSnap server');
+    });
 
-ServerSocketService.addEventListener('clientSize', (event) => {
-  console.log('📐 Screen size sent:', event.width, 'x', event.height);
-});
+    ServerSocketService.addEventListener('clientSize', (event) => {
+      console.log('📐 Screen size sent:', event.width, 'x', event.height);
+    });
 
-// Handle disconnection
-window.addEventListener('beforeunload', () => {
-  ServerSocketService.emit('destroy', undefined);
-});
+
+    
+    const onPointerPress = (event) => {
+      console.log(`👆 Pointer press: (${event.clientX}, ${event.clientY})`);
+      ServerSocketService.emit('pointerPress', { x: event.clientX, y: event.clientY });
+    };
+
+    const onPointerMove = (event) => {
+      ServerSocketService.emit('pointerMove', { x: event.clientX, y: event.clientY });
+    };
+
+    const onPointerUp = (event) => {
+      console.log(`👆 Pointer release: (${event.clientX}, ${event.clientY})`);
+      ServerSocketService.emit('pointerRelease', { x: event.clientX, y: event.clientY });
+    };
+
+    //Emit user's inputs to the server
+    window.onpointerdown = onPointerPress;
+    window.onpointermove = onPointerMove;
+    window.onpointerup = onPointerUp;
+
+    ServerSocketService.Connection.on('snapDevices', (event) => {
+      console.log('Devices snapped together!', event);
+
+    });
+
+
+    // Handle disconnection
+    window.addEventListener('beforeunload', () => {
+      ServerSocketService.emit('destroy', undefined);
+    });
 
     if (playback === 1) {
       startTimeRef.current = performance.now() - progressRef.current * getTotalMs()
