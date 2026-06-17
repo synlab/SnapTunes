@@ -1,10 +1,10 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { TopBar } from './components/topbar/TopBar'
 import { NoteSpace } from './components/notespace/NoteSpace'
 import { DrumSpace } from './components/notespace/DrumSpace'
 import { ControlPanel } from './components/ControlPanel'
 import * as ctx from './contexts/snaptunestatecontext'
-import { VirtualRoom, ServerSocketService } from 'simsnap-core'
+import { ServerSocketService } from 'simsnap-core'
 import './App.css'
 
 function App() {
@@ -17,34 +17,33 @@ function App() {
   const animFrameRef = useRef(null)
   const startTimeRef = useRef(null)
 
+const [snapBorders, setSnapBorders] = useState([]);
+const [isSnapped, setIsSnapped] = useState(false);
+
   // Two measures at the current BPM
   // One measure = 4 beats, so two measures = 8 beats
   const getTotalMs = () => (8 / (bpm / 60)) * 1000
 
 
   useEffect(() => {
-
-    // Initialize connection
+    // Initialize connection once and keep the socket listeners stable.
     ServerSocketService.InitConnection(
-      'ROOM_SHARED',           // room code
-      window.location.hostname,         // server IP
-      4000,               // server port
-      window.innerWidth,   // client screen width
-      window.innerHeight,  // client screen height
-      true               // use HTTP (true for HTTPS)
+      '',
+      window.location.hostname,
+      4000,
+      window.innerWidth,
+      window.innerHeight,
+      true
     );
 
-    // Listen for connection events
-    ServerSocketService.addEventListener('connect', () => {
+    const onConnect = () => {
       console.log('Connected to SimSnap server');
-    });
+    };
 
-    ServerSocketService.addEventListener('clientSize', (event) => {
+    const onClientSize = (event) => {
       console.log('📐 Screen size sent:', event.width, 'x', event.height);
-    });
+    };
 
-
-    
     const onPointerPress = (event) => {
       console.log(`👆 Pointer press: (${event.clientX}, ${event.clientY})`);
       ServerSocketService.emit('pointerPress', { x: event.clientX, y: event.clientY });
@@ -59,22 +58,67 @@ function App() {
       ServerSocketService.emit('pointerRelease', { x: event.clientX, y: event.clientY });
     };
 
-    //Emit user's inputs to the server
+    const onSnapBorder = (snapedDeviceId, position, color) => {
+      console.log(`🔗 Snap border received: device=${snapedDeviceId}, position=${position}, color=${color}`);
+      const isVerticalBorder = ['left', 'right'].includes(position);
+      const strokeWidth = '5px';
+      const isCurrentlyFullscreen = !!document.fullscreenElement;
+
+      setSnapBorders(prev => [...prev.filter(border => border.id !== snapedDeviceId), {
+        id: snapedDeviceId,
+        x: isVerticalBorder ? (position === 'left' ? '0px' : `calc(100% - ${strokeWidth})`) : `${strokeWidth}`,
+        y: isVerticalBorder ? '0px' : (isVerticalBorder ? `${strokeWidth}px` : (position === 'top' ? '0px' : `calc(100% - ${strokeWidth})`)),
+        width: isVerticalBorder ? strokeWidth : '100%',
+        height: isVerticalBorder && isCurrentlyFullscreen ? '100%' : (isVerticalBorder ? '100%' : strokeWidth),
+        color,
+        position
+      }]);
+      setIsSnapped(true);
+    };
+
+    const onUnsnapBorder = (snapedDeviceId) => {
+      console.log(`💔 Unsnap border received: device=${snapedDeviceId}`);
+      setSnapBorders(prev => {
+        const nextBorders = prev.filter(border => border.id !== snapedDeviceId);
+        setIsSnapped(nextBorders.length > 0);
+        return nextBorders;
+      });
+    };
+
+    const onSnapDevices = (event) => {
+      console.log('Devices snapped together!', event);
+    };
+
+    ServerSocketService.addEventListener('connect', onConnect);
+    ServerSocketService.addEventListener('clientSize', onClientSize);
+    ServerSocketService.Connection.on('snapDevices', onSnapDevices);
+    ServerSocketService.Connection.on('snapBorder', onSnapBorder);
+    ServerSocketService.Connection.on('unSnapBorder', onUnsnapBorder);
+
     window.onpointerdown = onPointerPress;
     window.onpointermove = onPointerMove;
     window.onpointerup = onPointerUp;
 
-    ServerSocketService.Connection.on('snapDevices', (event) => {
-      console.log('Devices snapped together!', event);
-
-    });
-
-
-    // Handle disconnection
-    window.addEventListener('beforeunload', () => {
+    const handleBeforeUnload = () => {
       ServerSocketService.emit('destroy', undefined);
-    });
+    };
 
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      ServerSocketService.Connection.off('snapDevices', onSnapDevices);
+      ServerSocketService.Connection.off('snapBorder', onSnapBorder);
+      ServerSocketService.Connection.off('unSnapBorder', onUnsnapBorder);
+      ServerSocketService.removeEventListener('connect', onConnect);
+      ServerSocketService.removeEventListener('clientSize', onClientSize);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.onpointerdown = null;
+      window.onpointermove = null;
+      window.onpointerup = null;
+    };
+  }, []);
+
+  useEffect(() => {
     if (playback === 1) {
       startTimeRef.current = performance.now() - progressRef.current * getTotalMs()
 
@@ -98,9 +142,8 @@ function App() {
       cancelAnimationFrame(animFrameRef.current)
       if (playback === 0) progressRef.current = 0
     }
-
     return () => cancelAnimationFrame(animFrameRef.current)
-  }, [playback])
+  }, [playback, bpm, setPlayback])
 
   return (
     <div
@@ -124,7 +167,23 @@ function App() {
           </ctx.SFXContextProvider>
         </ctx.UndoContextProvider>
       </ctx.DrawStateContextProvider>
-    </div>
+      {snapBorders.map(border => (
+            <div key={border.id} style={{
+                position: 'absolute',
+                left: border.x,
+                top: border.y,
+                width: border.width,
+                height: border.height,
+                backgroundColor: border.color                
+            }}></div>
+        ))}
+        {snapBorders.map((border, i) => (
+            <div style={{ position: 'absolute', top: `${200+ i * 20}px`, left: '0', backgroundColor: 'white'}}>left: {border.x} top: {border.y},
+                width: {border.width},
+                height: {border.height},</div>
+
+        ))}
+      </div>
   )
 }
 

@@ -9,12 +9,14 @@ import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded'
 import VolumeDownRoundedIcon from '@mui/icons-material/VolumeDownRounded'
 import VolumeUpRoundedIcon from '@mui/icons-material/VolumeUpRounded'
 import VolumeOffRoundedIcon from '@mui/icons-material/VolumeOffRounded'
+import FullscreenIcon from '@mui/icons-material/Fullscreen';
+import FullscreenExitIcon from '@mui/icons-material/Fullscreen';
 import * as ctx from '../../contexts/snaptunestatecontext'
 
 import { PiMetronome } from "react-icons/pi";
 
 import { MdOutlinePiano } from "react-icons/md";
-import { LuGuitar } from "react-icons/lu";
+import { LuFullscreen, LuGuitar } from "react-icons/lu";
 import { FaRegBell } from "react-icons/fa";
 import { LiaDrumSolid } from "react-icons/lia";
 
@@ -56,6 +58,31 @@ export function TopBar() {
   // BPM state (can be made editable later)
   const bpm = 60
 
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Gère l'action du bouton de bascule
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      // Demande le plein écran sur l'élément référencé
+      document.documentElement.requestFullscreen()
+        .then(() => setIsFullscreen(true))
+        .catch((err) => console.error(`Erreur : ${err.message}`));
+    } else {
+      // Quitte le plein écran (s'applique toujours au document)
+      document.exitFullscreen();
+      setIsFullscreen(false);
+    }
+  };
+
+  // Écoute les changements (ex: si l'utilisateur appuie sur la touche Échap)
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
 
   const toggleMute = () => {
     if (isMuted) {
@@ -284,6 +311,13 @@ export function TopBar() {
         <Tooltip title="Settings" placement="bottom">
           <IconButton sx={buttonStyle} onClick={() => {}}>
             <SettingsRoundedIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title="Settings" placement="bottom">
+          <IconButton sx={buttonStyle} onClick={toggleFullscreen}>
+            {isFullscreen ?
+             <FullscreenIcon fontSize="small" /> :
+              <FullscreenExitIcon fontSize="small" />}
           </IconButton>
         </Tooltip>
       </div>
