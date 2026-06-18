@@ -1,12 +1,11 @@
-import { Device } from 'simsnap-core';
-import { ClientSocketService } from 'simsnap-core';
+import { CanvasDevice, Device } from 'simsnap-core';
 import MusicClientSocketService from '../socketServices/MusicClientSocketService';
 
-export class MusicDevice extends Device {
+export class MusicDevice extends CanvasDevice {
     public client!: MusicClientSocketService;
 
     constructor(anchorPriority: number | null = null){
-        super(undefined, undefined, undefined, 'musicDevice');
+        super(undefined, undefined, undefined, anchorPriority, 'musicDevice');
     }
 }
 

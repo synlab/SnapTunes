@@ -8,10 +8,12 @@ import { ServerSocketService } from 'simsnap-core'
 import './App.css'
 
 function App() {
+
   const { instrument } = ctx.useInstrument()
   const { playback } = ctx.usePlayback()
   const { setPlayback } = ctx.useUpdatePlayback()
   const { bpm } = ctx.useBPM()
+  const containerRef = useRef(null);
 
   const progressRef = useRef(0)
   const animFrameRef = useRef(null)
@@ -20,19 +22,25 @@ function App() {
 const [snapBorders, setSnapBorders] = useState([]);
 const [isSnapped, setIsSnapped] = useState(false);
 
+const [receivedEvent, setReceivedEvent] = useState([]);
+
   // Two measures at the current BPM
   // One measure = 4 beats, so two measures = 8 beats
   const getTotalMs = () => (8 / (bpm / 60)) * 1000
 
 
   useEffect(() => {
+
+    const container = containerRef.current;
+    if (!container) return;
+
     // Initialize connection once and keep the socket listeners stable.
     ServerSocketService.InitConnection(
       '',
       window.location.hostname,
       4000,
-      window.innerWidth,
-      window.innerHeight,
+      container.clientWidth,
+      container.clientHeight,
       true
     );
 
@@ -59,6 +67,8 @@ const [isSnapped, setIsSnapped] = useState(false);
     };
 
     const onSnapBorder = (snapedDeviceId, position, color) => {
+      
+      // setReceivedEvent([ServerSocketService.]);
       console.log(`🔗 Snap border received: device=${snapedDeviceId}, position=${position}, color=${color}`);
       const isVerticalBorder = ['left', 'right'].includes(position);
       const strokeWidth = '5px';
@@ -77,6 +87,7 @@ const [isSnapped, setIsSnapped] = useState(false);
     };
 
     const onUnsnapBorder = (snapedDeviceId) => {
+
       console.log(`💔 Unsnap border received: device=${snapedDeviceId}`);
       setSnapBorders(prev => {
         const nextBorders = prev.filter(border => border.id !== snapedDeviceId);
@@ -86,7 +97,7 @@ const [isSnapped, setIsSnapped] = useState(false);
     };
 
     const onSnapDevices = (event) => {
-      console.log('Devices snapped together!', event);
+      console.log('Devices snapped together!', event.event1.device.id.value +" et "+ event.event1.device.id.value);
     };
 
     ServerSocketService.addEventListener('connect', onConnect);
@@ -95,9 +106,9 @@ const [isSnapped, setIsSnapped] = useState(false);
     ServerSocketService.Connection.on('snapBorder', onSnapBorder);
     ServerSocketService.Connection.on('unSnapBorder', onUnsnapBorder);
 
-    window.onpointerdown = onPointerPress;
-    window.onpointermove = onPointerMove;
-    window.onpointerup = onPointerUp;
+    containerRef.current.onpointerdown = onPointerPress;
+    containerRef.current.onpointermove = onPointerMove;
+    containerRef.current.onpointerup = onPointerUp;
 
     const handleBeforeUnload = () => {
       ServerSocketService.emit('destroy', undefined);
@@ -147,6 +158,7 @@ const [isSnapped, setIsSnapped] = useState(false);
 
   return (
     <div
+    ref={containerRef}
       style={{
         display: 'grid',
         gridTemplateRows: '1fr 9fr 2fr',
@@ -181,6 +193,10 @@ const [isSnapped, setIsSnapped] = useState(false);
             <div style={{ position: 'absolute', top: `${200+ i * 20}px`, left: '0', backgroundColor: 'white'}}>left: {border.x} top: {border.y},
                 width: {border.width},
                 height: {border.height},</div>
+
+        ))}
+        {receivedEvent.map((event, i) => (
+            <div style={{ position: 'absolute', top: `${200+ i * 20}px`, left: '400px', backgroundColor: 'white'}}>event: {event}</div>
 
         ))}
       </div>

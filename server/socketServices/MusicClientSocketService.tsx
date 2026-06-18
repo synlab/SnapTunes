@@ -1,22 +1,18 @@
-import { ClientSocketService, DeviceInteractionPointerEvent, Position, SnapDevicesEvent, SnapEvent, VirtualRoom } from "simsnap-core";
+import { CanvasClientSocketService, ClientSocketService, DeviceInteractionPointerEvent, Position, SnapDevicesEvent, SnapEvent, VirtualRoom } from "simsnap-core";
 import { Socket } from "socket.io";
 // @ts-ignore: resolved .tsx module without jsx compiler option
 import MusicDevice from "../entities/MusicDevice";
+import MusicCanvas from "../entities/MusicCanvas";
 
-export class MusicClientSocketService extends ClientSocketService {
+export class MusicClientSocketService extends CanvasClientSocketService{
     constructor(clientSocket: Socket,
-        virtualRoom: VirtualRoom,
+        virtualRoom: MusicCanvas,
         override device: MusicDevice = new MusicDevice()) {
         super(clientSocket, virtualRoom, device);
         this.device.client = this;
         console.log(`🔌 New client connected: ${clientSocket.id}`);
-        this.device.addEventListener("pointerPress", (event: DeviceInteractionPointerEvent)=>{
-            console.log(this.device.id.value+ " (" + event.device.id.value+ ") has pressed at " + event.x + ":" + event.y)
-        });
-        //Listen for events fired by the SnapManager
-        this.device.addEventListener("snap", this.snapBorder.bind(this))
-        this.device.addEventListener("unSnap", this.unSnapBorder.bind(this))
     }
+   
 
     snapBorder(event: SnapEvent) {
         console.log(`📤 Sending snap border to ${this.clientSocket.id}: position=${event.position}, color=${event.color}`);
@@ -24,7 +20,6 @@ export class MusicClientSocketService extends ClientSocketService {
     }
 
     unSnapBorder(event: SnapEvent) {
-        //This method is called twice but with a same device id
         console.log(`📤 Sending unsnap border to ${this.clientSocket.id}: position=${event.position}`);
         this.clientSocket.emit('unSnapBorder', event.snapDevice.id.value, event.position);
     }
