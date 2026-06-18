@@ -1,13 +1,13 @@
-import { CanvasClientSocketService, ClientSocketService, DeviceInteractionPointerEvent, Position, SnapDevicesEvent, SnapEvent, VirtualRoom } from "simsnap-core";
+import {  ClientSocketService, SnapEvent, VirtualRoom } from "simsnap-core";
 import { Socket } from "socket.io";
 // @ts-ignore: resolved .tsx module without jsx compiler option
 import MusicDevice from "../entities/MusicDevice";
-import MusicCanvas from "../entities/MusicCanvas";
 
-export class MusicClientSocketService extends CanvasClientSocketService{
+export class MusicClientSocketService extends ClientSocketService{
     constructor(clientSocket: Socket,
-        virtualRoom: MusicCanvas,
-        override device: MusicDevice = new MusicDevice()) {
+        override virtualRoom: VirtualRoom,
+        override device: MusicDevice = new MusicDevice()) 
+    {
         super(clientSocket, virtualRoom, device);
         this.device.client = this;
         console.log(`🔌 New client connected: ${clientSocket.id}`);
