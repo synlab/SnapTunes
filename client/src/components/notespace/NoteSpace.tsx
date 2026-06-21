@@ -58,11 +58,13 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
   const { setClear } = ctx.useUpdateClear()
   const { undo: shouldUndo } = ctx.useUndo()
   const { setUndo } = ctx.useUpdateUndo()
+  const { composition } = ctx.useComposition()
+  const { setComposition } = ctx.useUpdateComposition()
+  const { octave } = ctx.useOctave()
 
   //--- References ---//
   const containerRef = useRef<HTMLDivElement | null>(null)
   const p5Ref = useRef<P5Instance | null>(null)
-  const schedulerRef = useRef<unknown>(null)
 
   // Refs to sync context state with p5 sketch without remounting
   const drawStateRef = useRef<boolean>(drawState)
@@ -82,16 +84,19 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
     undoRef.current = shouldUndo
   }, [shouldUndo])
 
-
   /**
    * Initializes and manages p5 sketch
    */
   useEffect(() => {
+
+    if (!containerRef.current) return;
+
     const sketch = (p: P5Instance) => {
-      let composition: Note[] = [] // Master array of notes
+      let compositionTemp: Note[] =  composition// Master array of notes
       let eraseArr: StrokePoint[][] = [] // Erase strokes (visual only)
       let currentStroke: StrokePoint[] = [] // Stroke being drawn now
 
+      
       /**
        * Setup p5 canvas
        */
@@ -99,6 +104,9 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
         const width = containerRef.current?.offsetWidth ?? 0
         const height = containerRef.current?.offsetHeight ?? 0
         const canvas = p.createCanvas(width, height)
+        canvas.style('position', 'absolute')
+        canvas.style('top', '0')
+        canvas.style('left', '0')
         canvas.parent(containerRef.current as HTMLDivElement)
         p.background(255, 255, 255)
       }
@@ -154,11 +162,11 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
        * Renders all notes in composition
        */
       const drawComposition = () => {
-        if (composition.length === 0) return
+        if (compositionTemp.length === 0) return
 
         const rowHeight = p.height / GRID_ROWS
 
-        for (const note of composition) {
+        for (const note of compositionTemp) {
           const pitchIndex = WHITE_NOTES.indexOf(note.pitch as (typeof WHITE_NOTES)[number])
           const x = note.startTime * p.width
           const y = pitchIndex * rowHeight
@@ -211,13 +219,13 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
        */
       p.draw = () => {
         if (clearRef.current) {
-          composition = []
+          compositionTemp = []
           currentStroke = []
           setClear(false)
         }
 
         if (undoRef.current) {
-          composition.pop()
+          compositionTemp.pop()
           setUndo(false)
         }
 
@@ -253,12 +261,11 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
         if (drawStateRef.current) {
           // Quantize stroke and apply to composition
           const notes = quantizeStroke(currentStroke, p.width, p.height)
-          composition = applyNotesToComposition(composition, notes)
+          compositionTemp = applyNotesToComposition(compositionTemp, notes)
 
-          // Update scheduler with new composition
-          if (schedulerRef.current && typeof (schedulerRef.current as { updateComposition?: (value: unknown) => void }).updateComposition === 'function') {
-            (schedulerRef.current as { updateComposition: (value: unknown) => void }).updateComposition(composition)
-          }
+          // Update composition with new composition
+          setComposition(compositionTemp)
+
         } else {
           // Add erase stroke (visual only)
           eraseArr.push(currentStroke)
@@ -270,8 +277,28 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
 
     p5Ref.current = new p5(sketch)
 
+    //Handling canvas updates when the container is resized
+    let resizeTimeout: NodeJS.Timeout;
+    const resizeObserver = new ResizeObserver((entries) => {
+      // Clear the previous resizing if an new one arrived immediately
+      clearTimeout(resizeTimeout);
+      
+      // Programm a resizing in 150ms
+      resizeTimeout = setTimeout(() => {
+        for (let entry of entries) {
+          const { width, height } = entry.contentRect;
+          if (p5Ref.current) {
+            p5Ref.current.resizeCanvas(width, height);
+          }
+        }
+      }, 150); // wait for 150ms to prevent a performance drop
+    });
+
+    resizeObserver.observe(containerRef.current)
+
     // Cleanup on unmount
     return () => {
+      resizeObserver.disconnect()
       if (p5Ref.current) {
         p5Ref.current.remove()
         p5Ref.current = null
@@ -279,6 +306,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
     }
   }, [progressRef, setClear, setUndo])
 
+  
   return (
     <div
       style={{
@@ -291,6 +319,14 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
         overflow: 'hidden',
       }}
     >
+      {/* Temporary - for debug only */}
+      <div style={{
+        position: 'absolute',
+        top: '0',
+        left: '0'
+      }}>
+        Octave: {octave}
+      </div>
       <div
         style={{
           position: 'relative',
@@ -315,10 +351,13 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
 
       <div
         ref={containerRef}
+        id='canvas-container'
         style={{
           flex: 1,
           position: 'relative',
           cursor: 'crosshair',
+          minWidth: 0,
+          minHeight: 0,
         }}
       />
     </div>

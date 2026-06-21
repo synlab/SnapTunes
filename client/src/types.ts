@@ -5,10 +5,18 @@ export const WHITE_NOTES = ['B', 'A', 'G', 'F', 'E', 'D', 'C'] as const
 
 export type WhiteNote = (typeof WHITE_NOTES)[number]
 
+
+export enum Instrument {
+  Piano = "piano" ,
+  Guitar = "guitar",
+  Bells = "bells",
+  Drums = "drums",
+} 
+ 
 /**
  * Grid configuration
  */
-export const GRID_COLS = 16
+export const GRID_COLS = 16 //One composition is composed of 16 beats (4 bar)
 export const GRID_ROWS = WHITE_NOTES.length
 
 /**

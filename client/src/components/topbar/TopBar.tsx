@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { IconButton, Tooltip, Slider } from '@mui/material'
+import * as Tone from 'tone';
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
 import PauseRoundedIcon from '@mui/icons-material/PauseRounded'
 import StopRoundedIcon from '@mui/icons-material/StopRounded'
@@ -15,12 +16,14 @@ import * as ctx from '../../contexts/snaptunestatecontext'
 
 import { PiMetronome } from 'react-icons/pi'
 import { MdOutlinePiano } from 'react-icons/md'
-import { LuFullscreen, LuGuitar } from 'react-icons/lu'
+import { LuGuitar } from 'react-icons/lu'
 import { FaRegBell } from 'react-icons/fa'
 import { LiaDrumSolid } from 'react-icons/lia'
+import { Instrument, Note } from '../../types'
+
 
 interface InstrumentPreset {
-  label: string
+  label: Instrument
   icon: ReactNode
 }
 
@@ -38,26 +41,30 @@ const playButtonStyle = {
 }
 
 const INSTRUMENT_PRESETS: InstrumentPreset[] = [
-  { label: 'Piano', icon: <MdOutlinePiano /> },
-  { label: 'Guitar', icon: <LuGuitar /> },
-  { label: 'Bells', icon: <FaRegBell /> },
-  { label: 'Percussion', icon: <LiaDrumSolid fontSize="28px" /> },
+  { label: Instrument.Piano , icon: <MdOutlinePiano /> },
+  { label: Instrument.Guitar, icon: <LuGuitar /> },
+  { label: Instrument.Bells, icon: <FaRegBell /> },
+  { label: Instrument.Drums, icon: <LiaDrumSolid fontSize="28px" /> },
 ]
 
 export function TopBar() {
   const { playback } = ctx.usePlayback()
   const { setPlayback } = ctx.useUpdatePlayback()
 
+  const { composition } = ctx.useComposition()
+  const { octave } = ctx.useOctave()
+   const { bpm } = ctx.useBPM()
+   const { setBPM } = ctx.useUpdateBPM()
+
   const { setInstrument } = ctx.useUpdateInstrument()
 
   const [volume, setVolume] = useState<number>(75)
   const [prevVolume, setPrevVolume] = useState<number>(75)
   const [instrumentMenuOpen, setInstrumentMenuOpen] = useState<boolean>(false)
-  const [activeInstrument, setActiveInstrument] = useState<number>(0)
+  const [activeInstrument, setActiveInstrument] = useState<Instrument>(Instrument.Piano)
   const instrumentRef = useRef<HTMLDivElement | null>(null)
 
   const isMuted = volume === 0
-  const bpm = 60
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false)
 
   //Fullscreen handler
@@ -116,7 +123,11 @@ export function TopBar() {
   const handleVolumeChange = (_event: Event, value: number | number[]): void => {
     setVolume(Array.isArray(value) ? value[0] : value)
   }
+  const handleBPMChange = (_event: Event, value: number | number[]): void => {
+    setBPM(Array.isArray(value) ? value[0] : value)
+  }
 
+  
   return (
     <div
       style={{
@@ -174,6 +185,21 @@ export function TopBar() {
           </span>
         </div>
 
+        <Slider
+            value={bpm}
+            onChange={handleBPMChange}
+            min={30}
+            max={200}
+            size="small"
+            sx={{
+              width: '90px',
+              color: '#000',
+              '& .MuiSlider-thumb': { width: 12, height: 12, backgroundColor: '#4c66cf' },
+              '& .MuiSlider-track': { backgroundColor: '#4c66cf', border: 'none' },
+              '& .MuiSlider-rail': { backgroundColor: '#fff' },
+            }}
+          />
+
         <Tooltip title="Metronome" placement="bottom">
           <IconButton sx={playButtonStyle} onClick={() => {}}>
             <PiMetronome fontSize="25px" />
@@ -189,7 +215,7 @@ export function TopBar() {
               }}
               onClick={() => setInstrumentMenuOpen((open) => !open)}
             >
-              {INSTRUMENT_PRESETS[activeInstrument].icon}
+              {INSTRUMENT_PRESETS.find(preset => preset.label == activeInstrument)?.icon}
             </IconButton>
           </Tooltip>
 
@@ -241,25 +267,25 @@ export function TopBar() {
                 }}
               />
 
-              {INSTRUMENT_PRESETS.map((inst, index) => (
+              {INSTRUMENT_PRESETS.map(inst => (
                 <Tooltip key={inst.label} title={inst.label} placement="bottom">
                   <IconButton
                     onClick={() => {
-                      setActiveInstrument(index)
+                      setActiveInstrument(inst.label)
                       setInstrumentMenuOpen(false)
-                      setInstrument(index)
+                      setInstrument(inst.label)
                     }}
                     sx={{
                       color: '#4c66cf',
-                      backgroundColor: activeInstrument === index ? '#4c66cf' : '#f5f5f5',
+                      backgroundColor: activeInstrument === inst.label ? '#4c66cf' : '#f5f5f5',
                       borderRadius: '6px',
                       border: '1px solid #ddd',
                       transition: 'all 0.15s',
                       '& svg': {
-                        color: activeInstrument === index ? '#fff' : '#4c66cf',
+                        color: activeInstrument === inst.label ? '#fff' : '#4c66cf',
                       },
                       '&:hover': {
-                        backgroundColor: activeInstrument === index ? '#222' : '#e8e8e8',
+                        backgroundColor: activeInstrument === inst.label ? '#222' : '#e8e8e8',
                       },
                     }}
                   >
@@ -276,7 +302,8 @@ export function TopBar() {
         <Tooltip title="Play" placement="bottom">
           <IconButton
             sx={playButtonStyle}
-            onClick={() => {
+            onClick={async() => {
+              await Tone.start();
               if (playback === 1) setPlayback(2)
               else setPlayback(1)
             }}

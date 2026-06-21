@@ -6,6 +6,9 @@ import { ControlPanel } from './components/ControlPanel'
 import * as ctx from './contexts/snaptunestatecontext'
 import { ServerSocketService } from 'simsnap-core'
 import './App.css'
+import { Instrument, Note } from './types'
+import * as Tone from 'tone';
+
 
 interface SnapBorder {
   id: string
@@ -22,6 +25,8 @@ function App() {
   const { playback } = ctx.usePlayback()
   const { setPlayback } = ctx.useUpdatePlayback()
   const { bpm } = ctx.useBPM()
+  const { composition } = ctx.useComposition()
+  const { octave } = ctx.useOctave()
 
   // const containerRef = useRef<HTMLDivElement>(null)
   const progressRef = useRef<number>(0)
@@ -99,7 +104,7 @@ function App() {
     const onPointerUp = (event: PointerEvent): void => {
       console.log(`👆 Pointer release: (${event.clientX}, ${event.clientY})`)
       ServerSocketService.emit('pointerRelease', { x: event.clientX, y: event.clientY })
-    } 
+    }
 
     //Intercept native pointer event
     containerRef.current!.onpointerdown = onPointerPress
@@ -124,10 +129,108 @@ function App() {
     }
   }, [''])
 
-  useEffect(() => {
-    const totalMs = (8 / (bpm / 60)) * 1000
+  const [loadedInstruments, setLoadedInstruments] = useState<Record<Instrument, boolean>>({
+    [Instrument.Piano]: false,
+    [Instrument.Guitar]: false,
+    [Instrument.Bells]: false,
+    [Instrument.Drums]: false
+  });
+  // References to stock instances of Tone.Sampler whitout triggering re-renders
+  const samplersRef = useRef<Record<Instrument, Tone.Sampler | null>>({
+    [Instrument.Piano]: null,
+    [Instrument.Guitar]: null,
+    [Instrument.Bells]: null,
+    [Instrument.Drums]: null,
+  });
 
+
+  // Inital instruments loading
+  useEffect(() => {
+
+    // Piano samples
+    samplersRef.current.piano = new Tone.Sampler({
+      urls: {
+        A3: "Piano_A3.mp3",
+        B3: "Piano_B3.mp3",
+        C3: "Piano_C3.mp3",
+        D3: "Piano_D3.mp3",
+        E3: "Piano_E3.mp3",
+        F3: "Piano_F3.mp3",
+        G3: "Piano_G3.mp3"
+      },
+      baseUrl: "audio/piano/",
+      onload: () => setLoadedInstruments(prev => ({ ...prev, [Instrument.Piano]: true }))
+    }).toDestination();
+
+    // Guitar samples
+    samplersRef.current.guitar = new Tone.Sampler({
+      urls: {
+        A3: "guitar_A3.wav",
+        B3: "guitar_B3.wav",
+        C3: "guitar_C3.wav",
+        D3: "guitar_D3.wav",
+        E3: "guitar_E3.wav",
+        F3: "guitar_F3.wav",
+        G3: "guitar_G3.wav"
+      },
+      baseUrl: "audio/guitar/",
+      onload: () => setLoadedInstruments(prev => ({ ...prev, [Instrument.Guitar]: true }))
+    }).toDestination();
+
+    // 3. Bells
+    samplersRef.current.bells = new Tone.Sampler({
+      urls: { 
+        A3: "bells_A3.wav",
+        B3: "bells_B3.wav",
+        C3: "bells_C3.wav",
+        D3: "bells_D3.wav",
+        E3: "bells_E3.wav",
+        F3: "bells_F3.wav",
+        G3: "bells_G3.wav" },
+      baseUrl: "audio/bells/",
+      onload: () => setLoadedInstruments(prev => ({ ...prev, bells: true }))
+    }).toDestination();
+
+    // Clean up when unmount
+    return () => {
+      Object.values(samplersRef.current).forEach(sampler => sampler?.dispose());
+    };
+  }, []);
+
+  const constructComposition = async (totalDuration: number) => {
+    Tone.getTransport().cancel();
+    console.log("current instrument" + instrument);
+    composition.forEach((note: Note) => {
+      const startTimeSec = note.startTime * totalDuration;
+      const durationSec = note.duration * totalDuration;
+
+      Tone.getTransport().schedule((time) => {
+        const currentSampler = samplersRef.current[instrument!];
+        if (currentSampler) {
+          currentSampler.triggerAttackRelease(note.pitch + octave.toString(), durationSec, time);
+        }
+
+      }, startTimeSec);
+    });
+  }
+
+
+  useEffect(() => {
+    // 1 bar(measure) = 4 beats 
+    // for a 4/4 signature (Common Time)
+    const totalDurationSec = (16 / bpm) * 60; // The composition is 16 beats long (4 bar)
+    //Example: at a BPM of 60 it gives 4s because for 
+    const totalMs = totalDurationSec * 1000;
+
+    //Composition is playing
     if (playback === 1) {
+
+      constructComposition(totalDurationSec);
+
+      // Align the audio position with the visual position (when resuming after a pause)
+      Tone.getTransport().seconds = progressRef.current * totalDurationSec;
+      Tone.getTransport().start();
+
       startTimeRef.current = performance.now() - progressRef.current * totalMs
 
       const tick = (now: number): void => {
@@ -137,23 +240,31 @@ function App() {
         const elapsed = now - startTime
         const progress = elapsed / totalMs
 
+        //Does the progress bar has reached the end of composition ? (1 = absolute size of compostion) 
         if (progress >= 1) {
           progressRef.current = 0
           setPlayback('stop')
           return
         }
 
+        //If not we continue to progress on composition
         progressRef.current = progress
         animFrameRef.current = requestAnimationFrame(tick)
       }
-
+      
       animFrameRef.current = requestAnimationFrame(tick)
     } else {
+
+      Tone.getTransport().pause();
+
       if (animFrameRef.current !== null) {
         cancelAnimationFrame(animFrameRef.current)
       }
 
-      if (playback === 0) progressRef.current = 0
+      if (playback === 0 || playback == 'stop') {
+        Tone.getTransport().stop();
+        progressRef.current = 0
+      }
     }
 
     return () => {
@@ -183,8 +294,8 @@ function App() {
       <ctx.DrawStateContextProvider>
         <ctx.UndoContextProvider>
           <ctx.SFXContextProvider>
-             <TopBar />
-            {instrument === 3 ? <DrumSpace progressRef={progressRef} /> : <NoteSpace progressRef={progressRef} />}
+            <TopBar />
+            {instrument === Instrument.Drums ? <DrumSpace progressRef={progressRef} /> : <NoteSpace progressRef={progressRef} />}
             <ControlPanel />
           </ctx.SFXContextProvider>
         </ctx.UndoContextProvider>

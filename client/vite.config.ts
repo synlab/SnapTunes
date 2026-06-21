@@ -1,17 +1,19 @@
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import path from 'path';
-import basicSsl from '@vitejs/plugin-basic-ssl';
+import { defineConfig, PluginOption } from 'vite'
+import react from '@vitejs/plugin-react'
+import basicSsl from '@vitejs/plugin-basic-ssl'
 
-// https://vite.dev/config/
-export default defineConfig({
-  plugins: [react(), basicSsl()],
-  server: {
-    host: true
-  },
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, 'src'),
-    },
-  },
-});
+export default defineConfig(({ mode }) => {
+  // Conditionally add the SSL plugin based on the mode
+  const plugins: PluginOption[] = [react()]
+
+  if (mode === 'ssl') {
+    plugins.push(basicSsl())
+  }
+
+  return {
+    plugins,
+    server: {
+      host: true
+    }
+  }
+})

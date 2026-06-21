@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, type ReactNode, type Dispatch, type SetStateAction } from 'react'
+import { Instrument, Note } from '../types'
 
 interface PlaybackContextValue {
   playback: 0 | 1 | 2 | 'stop'
@@ -6,6 +7,26 @@ interface PlaybackContextValue {
 
 interface PlaybackUpdateContextValue {
   setPlayback: Dispatch<SetStateAction<0 | 1 | 2 | 'stop'>>
+}
+
+//Composition of the instruments without percussion
+interface CompostionContextValue {
+  composition: Note[]
+}
+
+interface CompositionUpdateContextValue {
+  setComposition: Dispatch<SetStateAction<Note[]>>
+}
+
+//Composition of the percussion instruments (drums)
+interface DrumsCompostionContextValue {
+  drumsComposition: Note[] //Maybe not the same kind of note ? 
+  // There is no pitch on a percussion ?
+}
+
+
+interface DrumsCompositionUpdateContextValue {
+  setDrumsComposition: Dispatch<SetStateAction<Note[]>>
 }
 
 interface DrawStateContextValue {
@@ -41,11 +62,11 @@ interface OctaveUpdateContextValue {
 }
 
 interface InstrumentContextValue {
-  instrument: number | null
+  instrument: Instrument | null
 }
 
 interface InstrumentUpdateContextValue {
-  setInstrument: Dispatch<SetStateAction<number | null>>
+  setInstrument: Dispatch<SetStateAction<Instrument | null>>
 }
 
 interface SFXContextValue {
@@ -70,6 +91,12 @@ interface ProviderProps {
 
 const PlaybackContext = createContext<PlaybackContextValue | undefined>(undefined)
 const UpdatePlaybackContext = createContext<PlaybackUpdateContextValue | undefined>(undefined)
+
+const CompositionContext = createContext<CompostionContextValue | undefined>(undefined)
+const UpdateCompositionContext = createContext<CompositionUpdateContextValue | undefined>(undefined)
+
+const DrumsCompositionContext = createContext<DrumsCompostionContextValue | undefined>(undefined)
+const UpdateDrumsCompositionContext = createContext<DrumsCompositionUpdateContextValue | undefined>(undefined)
 
 const DrawStateContext = createContext<DrawStateContextValue | undefined>(undefined)
 const UpdateDrawStateContext = createContext<DrawStateUpdateContextValue | undefined>(undefined)
@@ -112,6 +139,30 @@ export const PlaybackContextProvider = ({ children }: ProviderProps) => {
   )
 }
 
+export const CompositionContextProvider = ({ children }: ProviderProps) => {
+  const [composition, setComposition] = useState<Note[]>([])
+
+  return (
+    <CompositionContext.Provider value={{ composition }}>
+      <UpdateCompositionContext.Provider value={{ setComposition }}>
+        {children}
+      </UpdateCompositionContext.Provider>
+    </CompositionContext.Provider>
+  )
+}
+
+export const DrumsCompositionContextProvider = ({ children }: ProviderProps) => {
+  const [drumsComposition, setDrumsComposition] = useState<Note[]>([])
+
+  return (
+    <DrumsCompositionContext.Provider value={{ drumsComposition }}>
+      <UpdateDrumsCompositionContext.Provider value={{ setDrumsComposition }}>
+        {children}
+      </UpdateDrumsCompositionContext.Provider>
+    </DrumsCompositionContext.Provider>
+  )
+}
+
 export const DrawStateContextProvider = ({ children }: ProviderProps) => {
   const [drawState, setDrawState] = useState<boolean>(true)
 
@@ -149,7 +200,7 @@ export const UndoContextProvider = ({ children }: ProviderProps) => {
 }
 
 export const OctaveContextProvider = ({ children }: ProviderProps) => {
-  const [octave, setOctave] = useState<number>(0)
+  const [octave, setOctave] = useState<number>(5)
 
   return (
     <OctaveContext.Provider value={{ octave }}>
@@ -161,7 +212,7 @@ export const OctaveContextProvider = ({ children }: ProviderProps) => {
 }
 
 export const InstrumentContextProvider = ({ children }: ProviderProps) => {
-  const [instrument, setInstrument] = useState<number | null>(null)
+  const [instrument, setInstrument] = useState<Instrument | null>(Instrument.Piano)
 
   return (
     <InstrumentContext.Provider value={{ instrument }}>
@@ -202,6 +253,20 @@ export const usePlayback = (): PlaybackContextValue =>
 export const useUpdatePlayback = (): PlaybackUpdateContextValue =>
   useRequiredContext(useContext(UpdatePlaybackContext), 'Playback Update Error')
 
+//Composition
+export const useComposition = (): CompostionContextValue =>
+  useRequiredContext(useContext(CompositionContext), 'Composition Error')
+
+export const useUpdateComposition = (): CompositionUpdateContextValue =>
+  useRequiredContext(useContext(UpdateCompositionContext), 'Composition Update Error')
+
+//Drums composition
+export const useDrumsComposition = (): DrumsCompostionContextValue =>
+  useRequiredContext(useContext(DrumsCompositionContext), 'Drums composition Error')
+
+export const useUpdateDrumsComposition = (): DrumsCompositionUpdateContextValue =>
+  useRequiredContext(useContext(UpdateDrumsCompositionContext), 'Drums composition Update Error')
+
 export const useDrawState = (): DrawStateContextValue =>
   useRequiredContext(useContext(DrawStateContext), 'DrawState Error')
 
@@ -230,7 +295,7 @@ export const useInstrument = (): InstrumentContextValue =>
 export const useUpdateInstrument = (): InstrumentUpdateContextValue =>
   useRequiredContext(useContext(UpdateInstrumentContext), 'Instrument Status Error')
 
-export const useSFX =(): SFXContextValue => useRequiredContext(useContext(SFXContext), 'SFX Error')
+export const useSFX = (): SFXContextValue => useRequiredContext(useContext(SFXContext), 'SFX Error')
 
 export const useUpdateSFX = (): SFXUpdateContextValue =>
   useRequiredContext(useContext(UpdateSFXContext), 'SFX Error')
