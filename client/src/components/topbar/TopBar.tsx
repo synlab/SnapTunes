@@ -21,6 +21,10 @@ import { FaRegBell } from 'react-icons/fa'
 import { LiaDrumSolid } from 'react-icons/lia'
 import { Instrument, Note } from '../../types'
 
+interface TopBarProps {
+  volume: number,
+  setVolume: React.Dispatch<React.SetStateAction<number>>
+}
 
 interface InstrumentPreset {
   label: Instrument
@@ -47,7 +51,7 @@ const INSTRUMENT_PRESETS: InstrumentPreset[] = [
   { label: Instrument.Drums, icon: <LiaDrumSolid fontSize="28px" /> },
 ]
 
-export function TopBar() {
+export function TopBar({volume, setVolume} : TopBarProps) {
   const { playback } = ctx.usePlayback()
   const { setPlayback } = ctx.useUpdatePlayback()
 
@@ -58,13 +62,12 @@ export function TopBar() {
 
   const { setInstrument } = ctx.useUpdateInstrument()
 
-  const [volume, setVolume] = useState<number>(75)
-  const [prevVolume, setPrevVolume] = useState<number>(75)
+  const [prevVolume, setPrevVolume] = useState<number>(-20)
   const [instrumentMenuOpen, setInstrumentMenuOpen] = useState<boolean>(false)
   const [activeInstrument, setActiveInstrument] = useState<Instrument>(Instrument.Piano)
   const instrumentRef = useRef<HTMLDivElement | null>(null)
 
-  const isMuted = volume === 0
+  const isMuted = volume === -40 //When reaching currentDeviceVolume - 40db, we mute
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false)
 
   //Fullscreen handler
@@ -91,10 +94,10 @@ export function TopBar() {
 
   const toggleMute = (): void => {
     if (isMuted) {
-      setVolume(prevVolume || 75)
+      setVolume(prevVolume || -25)
     } else {
       setPrevVolume(volume)
-      setVolume(0)
+      setVolume(-40)
     }
   }
 
@@ -114,7 +117,7 @@ export function TopBar() {
 
   const VolumeIcon = isMuted
     ? VolumeOffRoundedIcon
-    : volume < 50
+    : volume < -25
       ? VolumeDownRoundedIcon
       : VolumeUpRoundedIcon
 
@@ -152,8 +155,8 @@ export function TopBar() {
           <Slider
             value={volume}
             onChange={handleVolumeChange}
-            min={0}
-            max={100}
+            min={-40}
+            max={0}
             size="small"
             sx={{
               width: '90px',

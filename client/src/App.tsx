@@ -35,6 +35,7 @@ function App() {
   const containerRef = useRef<HTMLDivElement>(null)
 
   const [snapBorders, setSnapBorders] = useState<SnapBorder[]>([])
+  const [volume, setVolume] = useState<number>(-20)
 
   useEffect(() => {
     const container = containerRef.current;
@@ -222,6 +223,16 @@ function App() {
     //Example: at a BPM of 60 it gives 4s because for 
     const totalMs = totalDurationSec * 1000;
 
+    //Handle volume (0 = current decibel level of the device)
+    if(volume <= -40){
+      Tone.getDestination().mute = true;
+    }else if (volume <= 0){
+      Tone.getDestination().mute = false;
+      Tone.getDestination().volume.value = volume;
+    } else { //Going above 0 dB is risky. It can harm your audio quality, your equipment, and your hearing
+      Tone.getDestination().mute = true; //Safety silent mode
+    }
+    
     //Composition is playing
     if (playback === 1) {
 
@@ -272,7 +283,7 @@ function App() {
         cancelAnimationFrame(animFrameRef.current)
       }
     }
-  }, [playback, bpm, setPlayback])
+  }, [playback, bpm, setPlayback, volume])
 
   return (
     <div
@@ -294,7 +305,7 @@ function App() {
       <ctx.DrawStateContextProvider>
         <ctx.UndoContextProvider>
           <ctx.SFXContextProvider>
-            <TopBar />
+            <TopBar volume={volume} setVolume={setVolume}/>
             {instrument === Instrument.Drums ? <DrumSpace progressRef={progressRef} /> : <NoteSpace progressRef={progressRef} />}
             <ControlPanel />
           </ctx.SFXContextProvider>
