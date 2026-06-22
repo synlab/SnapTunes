@@ -240,7 +240,7 @@ function App() {
   useEffect(() => {
     // 1 bar(measure) = 4 beats 
     // for a 4/4 signature (Common Time)
-    const totalDurationSec = (GRID_COLS) * 60; // The composition is 16 beats long (4 bar)
+    const totalDurationSec = (GRID_COLS / bpm) * 60; // The composition is 16 beats long (4 bar)
     //Example: at a BPM of 60 it gives 4s because for 
     const totalMs = totalDurationSec * 1000;
 
