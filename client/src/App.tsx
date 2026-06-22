@@ -34,9 +34,61 @@ function App() {
   const animFrameRef = useRef<number | null>(null)
   const startTimeRef = useRef<number | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  
 
   const [snapBorders, setSnapBorders] = useState<SnapBorder[]>([])
   const [volume, setVolume] = useState<number>(-20)
+  const [permissionGranted, setPermissionGranted] = useState<Boolean>(false)
+  const [MotionValues, setMotionValues] = useState({ alpha: 0, beta: 0, gamma: 0 });
+
+  const requestDeviceMotionPermission = async () => {
+        if (typeof (DeviceMotionEvent as any).requestPermission === 'function') {
+            // iOS 13+ devices
+            try {
+                const permissionState = await (DeviceMotionEvent as any).requestPermission();
+                setPermissionGranted(permissionState === 'granted');
+                console.log(`Device motion permission: ${permissionState}`);
+                return permissionState === 'granted';
+            } catch (error) {
+                console.error('Error requesting device motion permission:', error);
+                return false;
+            }
+        } else {
+            // Non-iOS devices (automatically granted)
+            setPermissionGranted(true);
+            console.log('Device motion permission: automatically granted');
+            return true;
+        }
+    };
+
+    // Device motion effect
+    useEffect(() => {
+        const handleDeviceAcceleration = (event: DeviceMotionEvent) => {
+            if (!permissionGranted) return;
+
+            const acceleration = event.acceleration ?? event.accelerationIncludingGravity;
+            const x = acceleration?.x || 0;
+            const y = acceleration?.y || 0;
+            const z = acceleration?.z || 0;
+            const timestamp: number = Date.now() as number;
+
+            setMotionValues({ alpha: x, beta: y, gamma: z });
+
+            // Send individual acceleration data to server for shake detection
+            console.log(`📱 Sending deviceMotion:`, { x: x, y: y, z: z });
+            ServerSocketService.emit('acceleration', { x,  y, z, timestamp });
+          };
+
+        if (permissionGranted) {
+            window.addEventListener('devicemotion', handleDeviceAcceleration);
+            console.log('Device motion listener added');
+        }
+
+        return () => {
+            window.removeEventListener('devicemotion', handleDeviceAcceleration);
+        };
+    }, [permissionGranted]);
+
 
   useEffect(() => {
     const container = containerRef.current;
@@ -54,7 +106,8 @@ function App() {
     )
 
     const onConnect = (): void => {
-      console.log('Connected to SimSnap server')
+      console.log('Connected to SimSnap server');
+      requestDeviceMotionPermission();
     }
 
     const onClientSize = (event: { width: number; height: number }): void => {
