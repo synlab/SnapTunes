@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, type MouseEvent, type RefObject } from 'react'
-
+import * as ctx from '../../contexts/snaptunestatecontext'
+import {Drum, GRID_COLS, Note } from '../../types'
 interface DrumSpaceProps {
   progressRef: RefObject<number>
 }
@@ -16,14 +17,18 @@ const TRACKS: Track[] = [
   { label: 'Clap', color: '#4c66cf' },
 ]
 
-const STEPS = 16
-const STEPS_PER_MEASURE = 8
+const STEPS = GRID_COLS
+const STEPS_PER_MEASURE = STEPS/2
 
 function createEmptyGrid(): boolean[][] {
+  //TODO: Add grid construction from existing drums composition
   return TRACKS.map(() => Array(STEPS).fill(false))
 }
 
 export function DrumSpace({ progressRef }: DrumSpaceProps) {
+
+  const {setDrumsComposition } = ctx.useUpdateDrumsComposition();
+
   const [grid, setGrid] = useState<boolean[][]>(createEmptyGrid)
   const [mouseDownStep, setMouseDownStep] = useState<boolean | null>(null)
   const [currentStep, setCurrentStep] = useState<number | null>(null)
@@ -48,6 +53,20 @@ export function DrumSpace({ progressRef }: DrumSpaceProps) {
       }
     }
   }, [progressRef])
+
+  //Rebuild drums composition from boolean grid
+  useEffect(()=>{
+    let newComposition: Note[] = [];
+    for(let i=0; i<grid.length; i++){
+      for(let j=0; j<grid[i].length; j++){
+        if(grid[i][j]){
+          newComposition.push(new Note(Object.values(Drum)[i], j/grid[i].length , 1/STEPS))
+        }
+      }
+    }
+    console.log(newComposition)
+    setDrumsComposition(newComposition);
+  }, [grid])
 
   const toggleStep = (trackIdx: number, stepIdx: number, forceValue?: boolean): void => {
     setGrid((prev) => {

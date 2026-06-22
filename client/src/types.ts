@@ -6,12 +6,21 @@ export const WHITE_NOTES = ['B', 'A', 'G', 'F', 'E', 'D', 'C'] as const
 export type WhiteNote = (typeof WHITE_NOTES)[number]
 
 
+
 export enum Instrument {
   Piano = "piano" ,
   Guitar = "guitar",
   Bells = "bells",
   Drums = "drums",
 } 
+
+export enum Drum {
+  Kick = 'B',
+  Snare = 'A',
+  HiHat = 'G',
+  Clap = 'F'
+} 
+
  
 /**
  * Grid configuration

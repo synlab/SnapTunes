@@ -6,7 +6,7 @@ import { ControlPanel } from './components/ControlPanel'
 import * as ctx from './contexts/snaptunestatecontext'
 import { ServerSocketService } from 'simsnap-core'
 import './App.css'
-import { Instrument, Note } from './types'
+import { GRID_COLS, Instrument, Note } from './types'
 import * as Tone from 'tone';
 
 
@@ -26,6 +26,7 @@ function App() {
   const { setPlayback } = ctx.useUpdatePlayback()
   const { bpm } = ctx.useBPM()
   const { composition } = ctx.useComposition()
+  const { drumsComposition } = ctx.useDrumsComposition()
   const { octave } = ctx.useOctave()
 
   // const containerRef = useRef<HTMLDivElement>(null)
@@ -178,18 +179,30 @@ function App() {
       onload: () => setLoadedInstruments(prev => ({ ...prev, [Instrument.Guitar]: true }))
     }).toDestination();
 
-    // 3. Bells
+    // Bells samples
     samplersRef.current.bells = new Tone.Sampler({
-      urls: { 
+      urls: {
         A3: "bells_A3.wav",
         B3: "bells_B3.wav",
         C3: "bells_C3.wav",
         D3: "bells_D3.wav",
         E3: "bells_E3.wav",
         F3: "bells_F3.wav",
-        G3: "bells_G3.wav" },
+        G3: "bells_G3.wav"
+      },
       baseUrl: "audio/bells/",
-      onload: () => setLoadedInstruments(prev => ({ ...prev, bells: true }))
+      onload: () => setLoadedInstruments(prev => ({ ...prev, [Instrument.Bells]: true }))
+    }).toDestination();
+
+    samplersRef.current[Instrument.Drums] = new Tone.Sampler({
+      urls: {
+        B3: "kick.wav",
+        A3: "snare.wav",
+        G3: "hihat.wav",
+        F3: "clap.wav"
+      },
+      baseUrl: "audio/drums/",
+      onload: () => setLoadedInstruments(prev => ({ ...prev, [Instrument.Drums]: true }))
     }).toDestination();
 
     // Clean up when unmount
@@ -201,14 +214,22 @@ function App() {
   const constructComposition = async (totalDuration: number) => {
     Tone.getTransport().cancel();
     console.log("current instrument" + instrument);
-    composition.forEach((note: Note) => {
+    const compositionSelected: Note[] = instrument === Instrument.Drums ? drumsComposition : composition
+    compositionSelected.forEach((note: Note) => {
       const startTimeSec = note.startTime * totalDuration;
+
       const durationSec = note.duration * totalDuration;
+      console.log(note.pitch+": start ="+startTimeSec+", duration ="+durationSec)
 
       Tone.getTransport().schedule((time) => {
         const currentSampler = samplersRef.current[instrument!];
         if (currentSampler) {
-          currentSampler.triggerAttackRelease(note.pitch + octave.toString(), durationSec, time);
+          if (instrument === Instrument.Drums) {
+            currentSampler.triggerAttackRelease(note.pitch + '3', durationSec, time);
+          } else {
+            currentSampler.triggerAttackRelease(note.pitch + octave.toString(), durationSec, time);
+          }
+
         }
 
       }, startTimeSec);
@@ -219,20 +240,20 @@ function App() {
   useEffect(() => {
     // 1 bar(measure) = 4 beats 
     // for a 4/4 signature (Common Time)
-    const totalDurationSec = (16 / bpm) * 60; // The composition is 16 beats long (4 bar)
+    const totalDurationSec = (GRID_COLS) * 60; // The composition is 16 beats long (4 bar)
     //Example: at a BPM of 60 it gives 4s because for 
     const totalMs = totalDurationSec * 1000;
 
     //Handle volume (0 = current decibel level of the device)
-    if(volume <= -40){
+    if (volume <= -40) {
       Tone.getDestination().mute = true;
-    }else if (volume <= 0){
+    } else if (volume <= 0) {
       Tone.getDestination().mute = false;
       Tone.getDestination().volume.value = volume;
     } else { //Going above 0 dB is risky. It can harm your audio quality, your equipment, and your hearing
       Tone.getDestination().mute = true; //Safety silent mode
     }
-    
+
     //Composition is playing
     if (playback === 1) {
 
@@ -262,7 +283,7 @@ function App() {
         progressRef.current = progress
         animFrameRef.current = requestAnimationFrame(tick)
       }
-      
+
       animFrameRef.current = requestAnimationFrame(tick)
     } else {
 
@@ -305,7 +326,7 @@ function App() {
       <ctx.DrawStateContextProvider>
         <ctx.UndoContextProvider>
           <ctx.SFXContextProvider>
-            <TopBar volume={volume} setVolume={setVolume}/>
+            <TopBar volume={volume} setVolume={setVolume} />
             {instrument === Instrument.Drums ? <DrumSpace progressRef={progressRef} /> : <NoteSpace progressRef={progressRef} />}
             <ControlPanel />
           </ctx.SFXContextProvider>

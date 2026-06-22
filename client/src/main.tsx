@@ -16,13 +16,15 @@ createRoot(rootElement).render(
   <ctx.BPMContextProvider>
     <ctx.PlaybackContextProvider>
       <ctx.CompositionContextProvider>
-        <ctx.InstrumentContextProvider>
-          <ctx.OctaveContextProvider>
-            <ctx.ClearContextProvider>
-              <App />
-            </ctx.ClearContextProvider>
-          </ctx.OctaveContextProvider>
-        </ctx.InstrumentContextProvider>
+        <ctx.DrumsCompositionContextProvider>
+          <ctx.InstrumentContextProvider>
+            <ctx.OctaveContextProvider>
+              <ctx.ClearContextProvider>
+                <App />
+              </ctx.ClearContextProvider>
+            </ctx.OctaveContextProvider>
+          </ctx.InstrumentContextProvider>
+        </ctx.DrumsCompositionContextProvider>
       </ctx.CompositionContextProvider>
     </ctx.PlaybackContextProvider>
   </ctx.BPMContextProvider>
