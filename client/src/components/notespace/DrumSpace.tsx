@@ -114,8 +114,7 @@ export function DrumSpace({ progressRef }: DrumSpaceProps) {
           flexShrink: 0,
           borderRight: `2px solid ${drumTheme.hex}`,
           display: 'flex',
-          flexDirection: 'column',
-          background: `rgb(${drumTheme.softRgb.join(', ')})`,
+          flexDirection: 'column'
         }}
       >
         {TRACKS.map((track, index) => (

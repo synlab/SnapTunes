@@ -1,9 +1,9 @@
 /**
- * Musical notes (white keys on a piano)
+ * Chromatic notes (single octave), ordered top-to-bottom for the piano roll.
  */
-export const WHITE_NOTES = ['B', 'A', 'G', 'F', 'E', 'D', 'C'] as const
+export const CHROMATIC_NOTES = ['B', 'A#', 'A', 'G#', 'G', 'F#', 'F', 'E', 'D#', 'D', 'C#', 'C'] as const
 
-export type WhiteNote = (typeof WHITE_NOTES)[number]
+export type PitchNote = (typeof CHROMATIC_NOTES)[number]
 
 
 
@@ -73,23 +73,10 @@ export enum Drum {
  * Grid configuration
  */
 export const GRID_COLS = 16 //One composition is composed of 16 beats (4 bar)
-export const GRID_ROWS = WHITE_NOTES.length
-
-/**
- * Indicates which notes have a sharp below them
- */
-export const HAS_SHARP_BELOW: Record<WhiteNote, boolean> = {
-  B: true,
-  A: true,
-  G: true,
-  F: false,
-  E: true,
-  D: true,
-  C: false,
-}
+export const GRID_ROWS = CHROMATIC_NOTES.length
 
 export interface NoteData {
-  pitch: WhiteNote
+  pitch: PitchNote
   startTime: number
   duration: number
 }
@@ -98,11 +85,11 @@ export interface NoteData {
  * Represents a quantized musical note
  */
 export class Note implements NoteData {
-  pitch: WhiteNote
+  pitch: PitchNote
   startTime: number
   duration: number
 
-  constructor(pitch: WhiteNote, startTime: number, duration: number) {
+  constructor(pitch: PitchNote, startTime: number, duration: number) {
     this.pitch = pitch
     this.startTime = startTime // 0-1, representing position on the timeline
     this.duration = duration // 0-1, representing position on the timeline

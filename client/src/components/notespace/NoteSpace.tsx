@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import * as ctx from '../../contexts/snaptunestatecontext'
 import p5 from 'p5'
-import { Instrument, INSTRUMENT_THEMES, Note, WHITE_NOTES, HAS_SHARP_BELOW, GRID_COLS, GRID_ROWS, type InstrumentTheme } from '../../types'
+import { Instrument, INSTRUMENT_THEMES, Note, CHROMATIC_NOTES, GRID_COLS, GRID_ROWS, type InstrumentTheme } from '../../types'
 import { applyNotesToComposition, gridSpanToNote, isInsideRelativeElementPosition, notesOverlap, pointToGridCell } from '../../utils/noteProcessor'
 
 type P5Instance = InstanceType<typeof p5>
@@ -44,9 +44,7 @@ interface NoteLabelCellProps {
   octave: number
   index: number
   totalNotes: number
-  hasSharpBelow: boolean
   accentColor: string
-  accentBackground: string
 }
 
 const DRAG_OVERLAY_ENTER_PULSE_KEYFRAMES = `@keyframes dragOverlayEnterPulse {
@@ -179,7 +177,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
 
       const getNoteRect = (note: Note) => {
         const rowHeight = p.height / GRID_ROWS
-        const pitchIndex = WHITE_NOTES.indexOf(note.pitch as (typeof WHITE_NOTES)[number])
+        const pitchIndex = CHROMATIC_NOTES.indexOf(note.pitch as (typeof CHROMATIC_NOTES)[number])
         return {
           x: note.startTime * p.width,
           y: pitchIndex * rowHeight,
@@ -230,7 +228,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
         // Reverse iteration matches draw order so top-most visual note wins hit-test.
         for (let i = compositionTemp.length - 1; i >= 0; i--) {
           const note = compositionTemp[i]
-          const pitchIndex = WHITE_NOTES.indexOf(note.pitch as (typeof WHITE_NOTES)[number])
+          const pitchIndex = CHROMATIC_NOTES.indexOf(note.pitch as (typeof CHROMATIC_NOTES)[number])
           const noteX = note.startTime * p.width
           const noteY = pitchIndex * rowHeight
           const noteWidth = note.duration * p.width
@@ -273,7 +271,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
         const durationCols = getNoteDurationCols(activeDraggedNote.sourceNote)
         const maxStartCol = GRID_COLS - durationCols
         const startCol = Math.max(0, Math.min(col - activeDraggedNote.pointerColOffset, maxStartCol))
-        const pitch = WHITE_NOTES[row] as (typeof WHITE_NOTES)[number]
+        const pitch = CHROMATIC_NOTES[row] as (typeof CHROMATIC_NOTES)[number]
 
         activeDraggedNote.draftNote = new Note(pitch, startCol / GRID_COLS, durationCols / GRID_COLS)
         updateDragOverlay(pointerX, pointerY)
@@ -358,7 +356,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
             continue
           }
 
-          const pitchIndex = WHITE_NOTES.indexOf(note.pitch as (typeof WHITE_NOTES)[number])
+          const pitchIndex = CHROMATIC_NOTES.indexOf(note.pitch as (typeof CHROMATIC_NOTES)[number])
           const x = note.startTime * p.width
           const y = pitchIndex * rowHeight
           const width = note.duration * p.width
@@ -405,7 +403,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
 
         const note = activeDraggedNote.draftNote
         const rowHeight = p.height / GRID_ROWS
-        const pitchIndex = WHITE_NOTES.indexOf(note.pitch as (typeof WHITE_NOTES)[number])
+        const pitchIndex = CHROMATIC_NOTES.indexOf(note.pitch as (typeof CHROMATIC_NOTES)[number])
         const x = note.startTime * p.width
         const y = pitchIndex * rowHeight
         const width = note.duration * p.width
@@ -426,7 +424,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
 
         const note = pendingLongPressDrag.sourceNote
         const rowHeight = p.height / GRID_ROWS
-        const pitchIndex = WHITE_NOTES.indexOf(note.pitch as (typeof WHITE_NOTES)[number])
+        const pitchIndex = CHROMATIC_NOTES.indexOf(note.pitch as (typeof CHROMATIC_NOTES)[number])
         const x = note.startTime * p.width
         const y = pitchIndex * rowHeight
         const width = note.duration * p.width
@@ -732,16 +730,14 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
           flexDirection: 'column',
         }}
       >
-        {WHITE_NOTES.map((note, index) => (
+        {CHROMATIC_NOTES.map((note, index) => (
           <NoteLabelCell
             key={note}
             note={note}
             octave={octave}
             index={index}
-            totalNotes={WHITE_NOTES.length}
-            hasSharpBelow={HAS_SHARP_BELOW[note]}
+            totalNotes={CHROMATIC_NOTES.length}
             accentColor={activeTheme.hex}
-            accentBackground={`rgb(${activeTheme.softRgb.join(', ')})`}
           />
         ))}
       </div>
@@ -787,58 +783,31 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
 /**
  * NoteLabelCell - Individual note label in sidebar
  */
-function NoteLabelCell({ note, octave, index, totalNotes, hasSharpBelow, accentColor, accentBackground }: NoteLabelCellProps) {
+function NoteLabelCell({ note, octave, index, totalNotes, accentColor }: NoteLabelCellProps) {
+  const isSharp = note.includes('#')
+
   return (
     <div
       style={{
-        position: 'relative',
         flex: 1,
         borderBottom: index < totalNotes - 1 ? `1px solid ${accentColor}` : 'none',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'flex-end',
-        paddingRight: '6px',
+        paddingRight: '10px',
+        background: isSharp ? '#111111' : '#ffffff',
       }}
     >
-      <div
+      <span
         style={{
-          position: 'absolute',
-          right: 0,
-          top: '12%',
-          bottom: '12%',
-          width: '46px',
-          background: accentBackground,
-          display: 'flex',
-          alignItems: 'flex-end',
-          justifyContent: 'center',
-          paddingBottom: '10px',
+          fontSize: '12px',
+          color: isSharp ? '#ffffff' : accentColor,
+          fontWeight: isSharp ? 700 : 400,
+          fontFamily: 'monospace',
         }}
       >
-        <span
-          style={{
-            fontSize: '12px',
-            color: accentColor,
-            fontWeight: 'normal',
-            fontFamily: 'monospace',
-          }}
-        >
-          {note}{octave}
-        </span>
-      </div>
-
-      {hasSharpBelow && index < totalNotes - 1 && (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: '-18%',
-            right: '0px',
-            width: '60px',
-            height: '36%',
-            background: accentColor,
-            zIndex: 2,
-          }}
-        />
-      )}
+        {note}{octave}
+      </span>
     </div>
   )
 }

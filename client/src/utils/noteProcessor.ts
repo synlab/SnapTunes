@@ -1,4 +1,4 @@
-import { Note, WHITE_NOTES, GRID_COLS, GRID_ROWS, type WhiteNote } from '../types'
+import { Note, CHROMATIC_NOTES, GRID_COLS, GRID_ROWS, type PitchNote } from '../types'
 
 export interface GridCell {
   col: number
@@ -42,7 +42,7 @@ export const gridSpanToNote = (
   const startCol = Math.max(0, Math.min(Math.min(anchorCol, currentCol), GRID_COLS - 1))
   const endCol = Math.max(0, Math.min(Math.max(anchorCol, currentCol), GRID_COLS - 1))
   const duration = (endCol - startCol + 1) / GRID_COLS
-  const pitch = WHITE_NOTES[safeRow] as WhiteNote
+  const pitch = CHROMATIC_NOTES[safeRow] as PitchNote
 
   return new Note(pitch, startCol / GRID_COLS, duration)
 }
