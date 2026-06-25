@@ -2,6 +2,7 @@ import { RoomSocketService, SnapDevicesEvent, VirtualRoom } from "simsnap-core";
 import MusicClientSocketService from "./MusicClientSocketService";
 import { Server, Socket } from "socket.io";
 import MusicDevice from "../entities/MusicDevice";
+import { MovementManagerDeviceEvent } from "simsnap-core/src/entities/VirtualRoom/MovementManager";
 
 export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
     private clients: MusicClientSocketService[] = [];
@@ -9,14 +10,12 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
     constructor(ioServer: Server, override virtualRoom: VirtualRoom = new VirtualRoom()) {
         super('', ioServer, virtualRoom, (clientSocket) => new MusicClientSocketService(clientSocket, virtualRoom));
         this.virtualRoom.movementManager?.configure(
-            500,  // 1.5 second window
-            1.8,   // 1.8x multiplier
-            1,    // 12 m/s² minimum
-            100    // 250ms cooldown
+            2000, // 2s window
+            400,  // 0,4s cooldown
+            12    // 12 m/s² minimum
         );
         this.virtualRoom.addEventListener('snapDevices', this.handleSnapDevices.bind(this));
         this.virtualRoom.addEventListener('unSnapDevices', this.handleUnSnapDevices.bind(this));
-        this.virtualRoom.addEventListener('shake', ()=> {console.log("tttttttt")});
     }  
 
     override addNewClient(clientSocket: Socket): MusicClientSocketService {

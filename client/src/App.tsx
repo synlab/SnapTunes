@@ -8,6 +8,7 @@ import { ServerSocketService } from 'simsnap-core'
 import './App.css'
 import { GRID_COLS, Instrument, Note } from './types'
 import * as Tone from 'tone';
+import { MovementManagerDeviceEvent } from 'simsnap-core/src/entities/VirtualRoom/MovementManager'
 
 
 interface SnapBorder {
@@ -28,6 +29,7 @@ function App() {
   const { composition } = ctx.useComposition()
   const { drumsComposition } = ctx.useDrumsComposition()
   const { octave } = ctx.useOctave()
+  const { setClear } = ctx.useUpdateClear();
 
   // const containerRef = useRef<HTMLDivElement>(null)
   const progressRef = useRef<number>(0)
@@ -39,7 +41,6 @@ function App() {
   const [snapBorders, setSnapBorders] = useState<SnapBorder[]>([])
   const [volume, setVolume] = useState<number>(-20)
   const [permissionGranted, setPermissionGranted] = useState<Boolean>(false)
-  const [MotionValues, setMotionValues] = useState({ alpha: 0, beta: 0, gamma: 0 });
 
   const requestDeviceMotionPermission = async () => {
         if (typeof (DeviceMotionEvent as any).requestPermission === 'function') {
@@ -66,17 +67,15 @@ function App() {
         const handleDeviceAcceleration = (event: DeviceMotionEvent) => {
             if (!permissionGranted) return;
 
-            const acceleration = event.acceleration ?? event.accelerationIncludingGravity;
+            const acceleration = event.acceleration;
             const x = acceleration?.x || 0;
             const y = acceleration?.y || 0;
             const z = acceleration?.z || 0;
             const timestamp: number = Date.now() as number;
 
-            setMotionValues({ alpha: x, beta: y, gamma: z });
-
             // Send individual acceleration data to server for shake detection
-            console.log(`📱 Sending deviceMotion:`, { x: x, y: y, z: z });
-            ServerSocketService.emit('acceleration', { x,  y, z, timestamp });
+            // console.log(`📱 Sending deviceMotion:`, { x: x, y: y, z: z });
+            ServerSocketService.emit('acceleration', { x,  y, z });
           };
 
         if (permissionGranted) {
@@ -142,10 +141,20 @@ function App() {
       setSnapBorders((prev) => prev.filter((border) => border.id !== snapedDeviceId))
     }
 
+
+    const onShake = (data: MovementManagerDeviceEvent): void => {
+      console.log(`🫨 Shake event received from device ${data.device.id.value}`);
+      setClear(true);
+    }
+
+
+
     ServerSocketService.Connection.on('connect', onConnect)
     ServerSocketService.Connection.on('clientSize', onClientSize)
     ServerSocketService.Connection.on('snapBorder', onSnapBorder)
     ServerSocketService.Connection.on('unSnapBorder', onUnsnapBorder)
+    ServerSocketService.Connection.on('shake', onShake)
+
 
     const onPointerPress = (event: PointerEvent): void => {
       console.log(`👆 Pointer press: (${event.clientX}, ${event.clientY})`)
@@ -293,7 +302,7 @@ function App() {
   useEffect(() => {
     // 1 bar(measure) = 4 beats 
     // for a 4/4 signature (Common Time)
-    const totalDurationSec = (GRID_COLS) * 60; // The composition is 16 beats long (4 bar)
+    const totalDurationSec = (GRID_COLS / bpm) * 60; // The composition is 16 beats long (4 bar)
     //Example: at a BPM of 60 it gives 4s because for 
     const totalMs = totalDurationSec * 1000;
 
