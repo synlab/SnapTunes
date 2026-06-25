@@ -270,6 +270,7 @@ export function TopBar({ volume, setVolume }: TopBarProps) {
           onChange={handleBPMChange}
           min={30}
           max={200}
+          step={5}
           size="small"
           sx={{
             width: '140px',
