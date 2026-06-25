@@ -200,7 +200,7 @@ export const UndoContextProvider = ({ children }: ProviderProps) => {
 }
 
 export const OctaveContextProvider = ({ children }: ProviderProps) => {
-  const [octave, setOctave] = useState<number>(5)
+  const [octave, setOctave] = useState<number>(4)
 
   return (
     <OctaveContext.Provider value={{ octave }}>

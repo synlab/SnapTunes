@@ -2,22 +2,27 @@ import { RoomSocketService, SnapDevicesEvent, VirtualRoom } from "simsnap-core";
 import MusicClientSocketService from "./MusicClientSocketService";
 import { Server, Socket } from "socket.io";
 import MusicDevice from "../entities/MusicDevice";
+import { MovementManagerDeviceEvent } from "simsnap-core/src/entities/VirtualRoom/MovementManager";
 
 export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
     private clients: MusicClientSocketService[] = [];
 
     constructor(ioServer: Server, override virtualRoom: VirtualRoom = new VirtualRoom()) {
         super('', ioServer, virtualRoom, (clientSocket) => new MusicClientSocketService(clientSocket, virtualRoom));
-
+        this.virtualRoom.movementManager?.configure(
+            2000, // 2s window
+            400,  // 0,4s cooldown
+            12    // 12 m/s² minimum
+        );
         this.virtualRoom.addEventListener('snapDevices', this.handleSnapDevices.bind(this));
         this.virtualRoom.addEventListener('unSnapDevices', this.handleUnSnapDevices.bind(this));
-    }
+    }  
 
     override addNewClient(clientSocket: Socket): MusicClientSocketService {
         const client = super.addNewClient(clientSocket);
         this.clients.push(client);
 
-       
+
         // Send device count to all clients
         const deviceCount = this.clients.length;
         console.log(`📊 Broadcasting deviceCount=${deviceCount} to all clients in room ${this.roomCode}`);
@@ -39,7 +44,7 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         client.addEventListener('destroy', () => {
             this.clientQuit(client);
 
-            if(this.virtualRoom.devices.length === 0){
+            if (this.virtualRoom.devices.length === 0) {
                 this.handleDestroy();
             }
         }, -1);
@@ -50,7 +55,7 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
 
     clientQuit(client: MusicClientSocketService) {
         this.clients = this.clients.filter(c => c.clientSocket.id !== client.clientSocket.id);
-        
+
         // Update device count for all remaining clients
         const deviceCount = this.clients.length;
         console.log(`📊 Broadcasting deviceCount=${deviceCount} after client quit`);
@@ -59,7 +64,7 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         console.log(`Client ${client.clientSocket.id} left room ${this.roomCode}. Remaining devices: ${this.virtualRoom.devices.length - 1}`);
     }
 
-    handleDestroy(){
+    handleDestroy() {
         this.virtualRoom.emit('destroy', undefined);
         this.emit('destroy', undefined);
     }

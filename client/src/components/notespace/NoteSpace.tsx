@@ -13,6 +13,7 @@ interface NoteSpaceProps {
 
 interface NoteLabelCellProps {
   note: string
+  octave: number
   index: number
   totalNotes: number
   hasSharpBelow: boolean
@@ -92,11 +93,11 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
     if (!containerRef.current) return;
 
     const sketch = (p: P5Instance) => {
-      let compositionTemp: Note[] =  composition// Master array of notes
+      let compositionTemp: Note[] = composition// Master array of notes
       let eraseArr: StrokePoint[][] = [] // Erase strokes (visual only)
       let currentStroke: StrokePoint[] = [] // Stroke being drawn now
 
-      
+
       /**
        * Setup p5 canvas
        */
@@ -214,9 +215,9 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
         }
       }
 
-       /**
-       * Main draw loop
-       */
+      /**
+      * Main draw loop
+      */
       p.draw = () => {
         if (clearRef.current) {
           compositionTemp = []
@@ -282,7 +283,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
     const resizeObserver = new ResizeObserver((entries) => {
       // Clear the previous resizing if an new one arrived immediately
       clearTimeout(resizeTimeout);
-      
+
       // Programm a resizing in 150ms
       resizeTimeout = setTimeout(() => {
         for (let entry of entries) {
@@ -306,7 +307,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
     }
   }, [progressRef, setClear, setUndo])
 
-  
+
   return (
     <div
       style={{
@@ -319,14 +320,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
         overflow: 'hidden',
       }}
     >
-      {/* Temporary - for debug only */}
-      <div style={{
-        position: 'absolute',
-        top: '0',
-        left: '0'
-      }}>
-        Octave: {octave}
-      </div>
+
       <div
         style={{
           position: 'relative',
@@ -342,6 +336,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
           <NoteLabelCell
             key={note}
             note={note}
+            octave={octave}
             index={index}
             totalNotes={WHITE_NOTES.length}
             hasSharpBelow={HAS_SHARP_BELOW[note]}
@@ -367,7 +362,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
 /**
  * NoteLabelCell - Individual note label in sidebar
  */
-function NoteLabelCell({ note, index, totalNotes, hasSharpBelow }: NoteLabelCellProps) {
+function NoteLabelCell({ note, octave, index, totalNotes, hasSharpBelow }: NoteLabelCellProps) {
   return (
     <div
       style={{
@@ -402,7 +397,7 @@ function NoteLabelCell({ note, index, totalNotes, hasSharpBelow }: NoteLabelCell
             fontFamily: 'monospace',
           }}
         >
-          {note}
+          {note}{octave}
         </span>
       </div>
 

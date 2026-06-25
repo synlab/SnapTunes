@@ -8,6 +8,7 @@ import { ServerSocketService } from 'simsnap-core'
 import './App.css'
 import { GRID_COLS, Instrument, Note } from './types'
 import * as Tone from 'tone';
+import { MovementManagerDeviceEvent } from 'simsnap-core/src/entities/VirtualRoom/MovementManager'
 
 
 interface SnapBorder {
@@ -28,15 +29,65 @@ function App() {
   const { composition } = ctx.useComposition()
   const { drumsComposition } = ctx.useDrumsComposition()
   const { octave } = ctx.useOctave()
+  const { setClear } = ctx.useUpdateClear();
 
   // const containerRef = useRef<HTMLDivElement>(null)
   const progressRef = useRef<number>(0)
   const animFrameRef = useRef<number | null>(null)
   const startTimeRef = useRef<number | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  
 
   const [snapBorders, setSnapBorders] = useState<SnapBorder[]>([])
   const [volume, setVolume] = useState<number>(-20)
+  const [permissionGranted, setPermissionGranted] = useState<Boolean>(false)
+
+  const requestDeviceMotionPermission = async () => {
+        if (typeof (DeviceMotionEvent as any).requestPermission === 'function') {
+            // iOS 13+ devices
+            try {
+                const permissionState = await (DeviceMotionEvent as any).requestPermission();
+                setPermissionGranted(permissionState === 'granted');
+                console.log(`Device motion permission: ${permissionState}`);
+                return permissionState === 'granted';
+            } catch (error) {
+                console.error('Error requesting device motion permission:', error);
+                return false;
+            }
+        } else {
+            // Non-iOS devices (automatically granted)
+            setPermissionGranted(true);
+            console.log('Device motion permission: automatically granted');
+            return true;
+        }
+    };
+
+    // Device motion effect
+    useEffect(() => {
+        const handleDeviceAcceleration = (event: DeviceMotionEvent) => {
+            if (!permissionGranted) return;
+
+            const acceleration = event.acceleration;
+            const x = acceleration?.x || 0;
+            const y = acceleration?.y || 0;
+            const z = acceleration?.z || 0;
+            const timestamp: number = Date.now() as number;
+
+            // Send individual acceleration data to server for shake detection
+            // console.log(`📱 Sending deviceMotion:`, { x: x, y: y, z: z });
+            ServerSocketService.emit('acceleration', { x,  y, z });
+          };
+
+        if (permissionGranted) {
+            window.addEventListener('devicemotion', handleDeviceAcceleration);
+            console.log('Device motion listener added');
+        }
+
+        return () => {
+            window.removeEventListener('devicemotion', handleDeviceAcceleration);
+        };
+    }, [permissionGranted]);
+
 
   useEffect(() => {
     const container = containerRef.current;
@@ -54,7 +105,8 @@ function App() {
     )
 
     const onConnect = (): void => {
-      console.log('Connected to SimSnap server')
+      console.log('Connected to SimSnap server');
+      requestDeviceMotionPermission();
     }
 
     const onClientSize = (event: { width: number; height: number }): void => {
@@ -89,10 +141,20 @@ function App() {
       setSnapBorders((prev) => prev.filter((border) => border.id !== snapedDeviceId))
     }
 
+
+    const onShake = (data: MovementManagerDeviceEvent): void => {
+      console.log(`🫨 Shake event received from device ${data.device.id.value}`);
+      setClear(true);
+    }
+
+
+
     ServerSocketService.Connection.on('connect', onConnect)
     ServerSocketService.Connection.on('clientSize', onClientSize)
     ServerSocketService.Connection.on('snapBorder', onSnapBorder)
     ServerSocketService.Connection.on('unSnapBorder', onUnsnapBorder)
+    ServerSocketService.Connection.on('shake', onShake)
+
 
     const onPointerPress = (event: PointerEvent): void => {
       console.log(`👆 Pointer press: (${event.clientX}, ${event.clientY})`)

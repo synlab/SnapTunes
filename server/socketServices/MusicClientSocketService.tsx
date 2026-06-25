@@ -2,6 +2,7 @@ import {  ClientSocketService, SnapEvent, VirtualRoom } from "simsnap-core";
 import { Socket } from "socket.io";
 // @ts-ignore: resolved .tsx module without jsx compiler option
 import MusicDevice from "../entities/MusicDevice";
+import { MovementManagerDeviceEvent } from "simsnap-core/src/entities/VirtualRoom/MovementManager";
 
 export class MusicClientSocketService extends ClientSocketService{
     constructor(clientSocket: Socket,
@@ -11,6 +12,7 @@ export class MusicClientSocketService extends ClientSocketService{
         super(clientSocket, virtualRoom, device);
         this.device.client = this;
         console.log(`🔌 New client connected: ${clientSocket.id}`);
+        this.device.addEventListener('shake', this.shake.bind(this))
     }
    
 
@@ -24,6 +26,10 @@ export class MusicClientSocketService extends ClientSocketService{
         this.clientSocket.emit('unSnapBorder', event.snapDevice.id.value, event.position);
     }
 
+    shake(data: MovementManagerDeviceEvent) {
+        console.log(`📤 Sending shake event to ${this.clientSocket.id}`);
+        this.clientSocket.emit('shake', data);
+    }
 
 }
 
