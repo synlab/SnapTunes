@@ -5,9 +5,6 @@ export interface GridCell {
   row: number
 }
 
-export type StrokePoint = readonly [number, number]
-export type Stroke = StrokePoint[]
-
 export const isInsideRelativeElementPosition = (
   x: number,
   y: number,
@@ -35,59 +32,19 @@ export const pointToGridCell = (
   }
 }
 
-export const gridCellToNote = (col: number, row: number): Note => {
-  const pitch = WHITE_NOTES[row] as WhiteNote
-  return new Note(pitch, col / GRID_COLS, 1 / GRID_COLS)
-}
+export const gridSpanToNote = (
+  anchorCol: number,
+  currentCol: number,
+  row: number
+): Note => {
+  // A drag always maps to one contiguous note span on a single locked row.
+  const safeRow = Math.max(0, Math.min(row, GRID_ROWS - 1))
+  const startCol = Math.max(0, Math.min(Math.min(anchorCol, currentCol), GRID_COLS - 1))
+  const endCol = Math.max(0, Math.min(Math.max(anchorCol, currentCol), GRID_COLS - 1))
+  const duration = (endCol - startCol + 1) / GRID_COLS
+  const pitch = WHITE_NOTES[safeRow] as WhiteNote
 
-export const extractGridCells = (
-  stroke: Stroke,
-  canvasWidth: number,
-  canvasHeight: number
-): GridCell[] => {
-  const cellSet = new Set<string>()
-
-  for (const [x, y] of stroke) {
-    const { col, row } = pointToGridCell(x, y, canvasWidth, canvasHeight)
-    cellSet.add(`${col},${row}`)
-  }
-
-  return Array.from(cellSet).map((cell) => {
-    const [col, row] = cell.split(',').map(Number)
-    return { col, row }
-  })
-}
-
-export const mergeAdjacentNotes = (notes: Note[]): Note[] => {
-  if (notes.length === 0) return []
-
-  const sortedNotes = [...notes].sort((a, b) => a.startTime - b.startTime)
-  const merged: Note[] = []
-  let currentGroup = [sortedNotes[0]]
-
-  for (let i = 1; i < sortedNotes.length; i++) {
-    const prev = sortedNotes[i - 1]
-    const current = sortedNotes[i]
-
-    const prevEnd = prev.startTime + prev.duration
-    const isAdjacent = Math.abs(prevEnd - current.startTime) < 0.001
-    const isSamePitch = prev.pitch === current.pitch
-
-    if (isAdjacent && isSamePitch) {
-      currentGroup.push(current)
-    } else {
-      merged.push(mergeGroup(currentGroup))
-      currentGroup = [current]
-    }
-  }
-
-  merged.push(mergeGroup(currentGroup))
-  return merged
-}
-
-const mergeGroup = (group: Note[]): Note => {
-  const totalDuration = group.reduce((sum, note) => sum + note.duration, 0)
-  return new Note(group[0].pitch, group[0].startTime, totalDuration)
+  return new Note(pitch, startCol / GRID_COLS, duration)
 }
 
 export const notesOverlap = (note1: Note, note2: Note): boolean => {
@@ -133,14 +90,4 @@ export const applyNotesToComposition = (
   }
 
   return result
-}
-
-export const quantizeStroke = (
-  stroke: Stroke,
-  canvasWidth: number,
-  canvasHeight: number
-): Note[] => {
-  const cells = extractGridCells(stroke, canvasWidth, canvasHeight)
-  const notes = cells.map(({ col, row }) => gridCellToNote(col, row))
-  return mergeAdjacentNotes(notes)
 }
