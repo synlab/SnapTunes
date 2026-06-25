@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { IconButton, Tooltip, Slider } from '@mui/material'
 import * as Tone from 'tone';
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
@@ -19,7 +19,7 @@ import { MdOutlinePiano } from 'react-icons/md'
 import { LuGuitar } from 'react-icons/lu'
 import { FaRegBell } from 'react-icons/fa'
 import { LiaDrumSolid } from 'react-icons/lia'
-import { Instrument, Note } from '../../types'
+import { Instrument, INSTRUMENT_THEMES } from '../../types'
 
 interface TopBarProps {
   volume: number,
@@ -32,7 +32,7 @@ interface InstrumentPreset {
 }
 
 const buttonStyle = {
-  color: 'rgb(76, 102, 207)',
+  color: '#4c66cf',
   backgroundColor: '#fff',
   borderRadius: '6px',
   padding: '6px',
@@ -45,27 +45,24 @@ const playButtonStyle = {
 }
 
 const INSTRUMENT_PRESETS: InstrumentPreset[] = [
-  { label: Instrument.Piano , icon: <MdOutlinePiano /> },
+  { label: Instrument.Piano, icon: <MdOutlinePiano /> },
   { label: Instrument.Guitar, icon: <LuGuitar /> },
   { label: Instrument.Bells, icon: <FaRegBell /> },
   { label: Instrument.Drums, icon: <LiaDrumSolid fontSize="28px" /> },
 ]
 
-export function TopBar({volume, setVolume} : TopBarProps) {
+export function TopBar({ volume, setVolume }: TopBarProps) {
   const { playback } = ctx.usePlayback()
   const { setPlayback } = ctx.useUpdatePlayback()
 
-  const { composition } = ctx.useComposition()
-  const { octave } = ctx.useOctave()
-   const { bpm } = ctx.useBPM()
-   const { setBPM } = ctx.useUpdateBPM()
+  const { bpm } = ctx.useBPM()
+  const { setBPM } = ctx.useUpdateBPM()
 
+  const { instrument } = ctx.useInstrument()
   const { setInstrument } = ctx.useUpdateInstrument()
 
   const [prevVolume, setPrevVolume] = useState<number>(-20)
-  const [instrumentMenuOpen, setInstrumentMenuOpen] = useState<boolean>(false)
-  const [activeInstrument, setActiveInstrument] = useState<Instrument>(Instrument.Piano)
-  const instrumentRef = useRef<HTMLDivElement | null>(null)
+  const activeInstrument = instrument ?? Instrument.Piano
 
   const isMuted = volume === -40 //When reaching currentDeviceVolume - 40db, we mute
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false)
@@ -101,20 +98,6 @@ export function TopBar({volume, setVolume} : TopBarProps) {
     }
   }
 
-  useEffect(() => {
-    if (!instrumentMenuOpen) return
-
-    const handleClickOutside = (event: MouseEvent): void => {
-      const target = event.target
-      if (instrumentRef.current && target instanceof Node && !instrumentRef.current.contains(target)) {
-        setInstrumentMenuOpen(false)
-      }
-    }
-
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [instrumentMenuOpen])
-
   const VolumeIcon = isMuted
     ? VolumeOffRoundedIcon
     : volume < -25
@@ -130,7 +113,15 @@ export function TopBar({volume, setVolume} : TopBarProps) {
     setBPM(Array.isArray(value) ? value[0] : value)
   }
 
-  
+  const handleInstrumentPointerDown = (
+    event: React.PointerEvent<HTMLButtonElement>,
+    targetInstrument: Instrument,
+  ): void => {
+    if (event.pointerType === 'mouse') return
+    setInstrument(targetInstrument)
+  }
+
+
   return (
     <div
       style={{
@@ -159,7 +150,7 @@ export function TopBar({volume, setVolume} : TopBarProps) {
             max={0}
             size="small"
             sx={{
-              width: '90px',
+              width: '140px',
               color: '#000',
               '& .MuiSlider-thumb': { width: 12, height: 12, backgroundColor: '#4c66cf' },
               '& .MuiSlider-track': { backgroundColor: '#4c66cf', border: 'none' },
@@ -168,6 +159,92 @@ export function TopBar({volume, setVolume} : TopBarProps) {
           />
         </div>
 
+
+
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            padding: '4px',
+            background: '#fff',
+            borderRadius: '10px',
+            border: '1px solid rgba(0, 0, 0, 0.12)',
+          }}
+        >
+          {INSTRUMENT_PRESETS.map((inst) => {
+            const theme = INSTRUMENT_THEMES[inst.label]
+            const isActive = activeInstrument === inst.label
+            const activeBg = `rgb(${theme.softRgb.join(', ')})`
+
+            return (
+              <div key={inst.label} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                {inst.label === Instrument.Drums && (
+                  <div
+                    style={{
+                      width: '2px',
+                      height: '30px',
+                      background: '#d1d1d1',
+                      margin: '0 2px',
+                    }}
+                  />
+                )}
+                <Tooltip title={inst.label} placement="bottom" >
+                  <IconButton
+                    onPointerDown={(event) => handleInstrumentPointerDown(event, inst.label)}
+                    onClick={() => setInstrument(inst.label)}
+                    sx={{
+                      color: isActive ? theme.hex : '#8f8f8f',
+                      backgroundColor: isActive ? activeBg : '#efefef',
+                      borderRadius: '8px',
+                      border: isActive ? `2px solid ${theme.hex}` : '2px solid transparent',
+                      width: '42px',
+                      height: '42px',
+                      transition: 'all 0.15s ease',
+                      '&:hover': {
+                        backgroundColor: isActive ? activeBg : '#e3e3e3',
+                      },
+                      '&.Mui-focusVisible': {
+                        backgroundColor: isActive ? activeBg : '#efefef',
+                      },
+                      '&:active': {
+                        backgroundColor: isActive ? activeBg : '#e3e3e3',
+                      },
+                      '& svg': {
+                        color: isActive ? theme.hex : '#8f8f8f',
+                      },
+                    }}
+                  >
+                    {inst.icon}
+                  </IconButton>
+                </Tooltip>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+        <Tooltip title="Play" placement="bottom">
+          <IconButton
+            sx={playButtonStyle}
+            onClick={async () => {
+              await Tone.start();
+              if (playback === 1) setPlayback(2)
+              else setPlayback(1)
+            }}
+          >
+            <PlaybackButton />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title="Stop" placement="bottom">
+          <IconButton sx={buttonStyle} onClick={() => setPlayback(0)}>
+            <StopRoundedIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      </div>
+
+      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
         <div
           style={{
             display: 'flex',
@@ -189,160 +266,25 @@ export function TopBar({volume, setVolume} : TopBarProps) {
         </div>
 
         <Slider
-            value={bpm}
-            onChange={handleBPMChange}
-            min={30}
-            max={200}
-            size="small"
-            sx={{
-              width: '90px',
-              color: '#000',
-              '& .MuiSlider-thumb': { width: 12, height: 12, backgroundColor: '#4c66cf' },
-              '& .MuiSlider-track': { backgroundColor: '#4c66cf', border: 'none' },
-              '& .MuiSlider-rail': { backgroundColor: '#fff' },
-            }}
-          />
-
-        <Tooltip title="Metronome" placement="bottom">
-          <IconButton sx={playButtonStyle} onClick={() => {}}>
-            <PiMetronome fontSize="25px" />
-          </IconButton>
-        </Tooltip>
-
-        <div ref={instrumentRef} style={{ position: 'relative' }}>
-          <Tooltip title="Instruments" placement="bottom">
-            <IconButton
-              sx={{
-                ...playButtonStyle,
-                backgroundColor: instrumentMenuOpen ? '#e0e0e0' : '#fff',
-              }}
-              onClick={() => setInstrumentMenuOpen((open) => !open)}
-            >
-              {INSTRUMENT_PRESETS.find(preset => preset.label == activeInstrument)?.icon}
-            </IconButton>
-          </Tooltip>
-
-          {instrumentMenuOpen && (
-            <div
-              style={{
-                position: 'absolute',
-                top: '50%',
-                left: 'calc(100% + 8px)',
-                transform: 'translateY(-50%)',
-                background: '#fff',
-                border: '1px solid #ddd',
-                borderRadius: '8px',
-                padding: '6px',
-                display: 'flex',
-                flexDirection: 'row',
-                gap: '4px',
-                boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
-                zIndex: 100,
-                borderWidth: '6px',
-                borderStyle: 'solid',
-                borderColor: 'transparent #ddd transparent transparent',
-              }}
-            >
-              <div
-                style={{
-                  position: 'absolute',
-                  right: '100%',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  width: 0,
-                  height: 0,
-                  borderTop: '6px solid transparent',
-                  borderBottom: '6px solid transparent',
-                  borderRight: '7px solid #ddd',
-                }}
-              />
-              <div
-                style={{
-                  position: 'absolute',
-                  right: 'calc(100% - 1px)',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  width: 0,
-                  height: 0,
-                  borderTop: '6px solid transparent',
-                  borderBottom: '6px solid transparent',
-                  borderRight: '7px solid #fff',
-                }}
-              />
-
-              {INSTRUMENT_PRESETS.map(inst => (
-                <Tooltip key={inst.label} title={inst.label} placement="bottom">
-                  <IconButton
-                    onClick={() => {
-                      setActiveInstrument(inst.label)
-                      setInstrumentMenuOpen(false)
-                      setInstrument(inst.label)
-                    }}
-                    sx={{
-                      color: '#4c66cf',
-                      backgroundColor: activeInstrument === inst.label ? '#4c66cf' : '#f5f5f5',
-                      borderRadius: '6px',
-                      border: '1px solid #ddd',
-                      transition: 'all 0.15s',
-                      '& svg': {
-                        color: activeInstrument === inst.label ? '#fff' : '#4c66cf',
-                      },
-                      '&:hover': {
-                        backgroundColor: activeInstrument === inst.label ? '#222' : '#e8e8e8',
-                      },
-                    }}
-                  >
-                    {inst.icon}
-                  </IconButton>
-                </Tooltip>
-              ))}
-            </div>
-          )}
-        </div>
+          value={bpm}
+          onChange={handleBPMChange}
+          min={30}
+          max={200}
+          size="small"
+          sx={{
+            width: '140px',
+            color: '#000',
+            '& .MuiSlider-thumb': { width: 12, height: 12, backgroundColor: '#4c66cf' },
+            '& .MuiSlider-track': { backgroundColor: '#4c66cf', border: 'none' },
+            '& .MuiSlider-rail': { backgroundColor: '#fff' },
+          }}
+        />
       </div>
-
-      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-        <Tooltip title="Play" placement="bottom">
-          <IconButton
-            sx={playButtonStyle}
-            onClick={async() => {
-              await Tone.start();
-              if (playback === 1) setPlayback(2)
-              else setPlayback(1)
-            }}
-          >
-            <PlaybackButton />
-          </IconButton>
-        </Tooltip>
-        <Tooltip title="Stop" placement="bottom">
-          <IconButton sx={buttonStyle} onClick={() => setPlayback(0)}>
-            <StopRoundedIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-      </div>
-
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-        <Tooltip title="Save" placement="bottom">
-          <IconButton sx={buttonStyle} onClick={() => {}}>
-            <SaveRoundedIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-        <Tooltip title="Export" placement="bottom">
-          <IconButton sx={buttonStyle} onClick={() => {}}>
-            <FileUploadRoundedIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-        <Tooltip title="Settings" placement="bottom">
-          <IconButton sx={buttonStyle} onClick={() => {}}>
-            <SettingsRoundedIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-        <Tooltip title="Fullscreen" placement="bottom">
-          <IconButton sx={buttonStyle} onClick={toggleFullscreen}>
-            {isFullscreen ? <FullscreenIcon fontSize="small" /> : <FullscreenExitIcon fontSize="small" />}
-          </IconButton>
-        </Tooltip>
-      </div>
+      <Tooltip title="Fullscreen" placement="bottom">
+        <IconButton sx={buttonStyle} onClick={toggleFullscreen}>
+          {isFullscreen ? <FullscreenIcon fontSize="small" /> : <FullscreenExitIcon fontSize="small" />}
+        </IconButton>
+      </Tooltip>
     </div>
   )
 }

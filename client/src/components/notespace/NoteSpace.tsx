@@ -1,7 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import * as ctx from '../../contexts/snaptunestatecontext'
 import p5 from 'p5'
-import { Note, WHITE_NOTES, HAS_SHARP_BELOW, GRID_COLS, GRID_ROWS } from '../../types'
+import { Instrument, INSTRUMENT_THEMES, Note, WHITE_NOTES, HAS_SHARP_BELOW, GRID_COLS, GRID_ROWS, type InstrumentTheme } from '../../types'
 import { quantizeStroke, applyNotesToComposition, isInsideRelativeElementPosition } from '../../utils/noteProcessor'
 
 type P5Instance = InstanceType<typeof p5>
@@ -17,13 +17,11 @@ interface NoteLabelCellProps {
   index: number
   totalNotes: number
   hasSharpBelow: boolean
+  accentColor: string
+  accentBackground: string
 }
 
-
-/**
- * Visual configuration for p5 rendering
- */
-const VISUAL_CONFIG = {
+const createVisualConfig = (theme: InstrumentTheme) => ({
   grid: {
     lineColor: [0, 0, 0, 60] as const,
     lineWeight: 0.5,
@@ -31,23 +29,27 @@ const VISUAL_CONFIG = {
     majorLineWeight: 1,
   },
   seekbar: {
-    color: [76, 102, 207, 40] as const,
+    color: theme.seekbar,
   },
   stroke: {
-    color: [76, 102, 207] as const,
+    color: theme.rgb,
     lineWeight: 20,
   },
   note: {
-    fill: [76, 102, 207, 200] as const,
-    stroke: [50, 70, 180] as const,
+    fill: theme.noteFill,
+    stroke: theme.noteStroke,
     lineWeight: 2,
   },
   erase: {
     color: [255, 255, 255] as const,
     lineWeight: 20,
   },
-}
+})
 
+
+/**
+ * Visual configuration for p5 rendering
+ */
 /**
  * NoteSpace component - Main note composition and drawing area
  * Manages stroke input, quantization, and note composition with conflict handling
@@ -62,6 +64,9 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
   const { composition } = ctx.useComposition()
   const { setComposition } = ctx.useUpdateComposition()
   const { octave } = ctx.useOctave()
+  const { instrument } = ctx.useInstrument()
+  const activeInstrument = instrument ?? Instrument.Piano
+  const activeTheme = INSTRUMENT_THEMES[activeInstrument]
 
   //--- References ---//
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -71,6 +76,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
   const drawStateRef = useRef<boolean>(drawState)
   const clearRef = useRef<boolean>(shouldClear)
   const undoRef = useRef<boolean>(shouldUndo)
+  const instrumentThemeRef = useRef<InstrumentTheme>(activeTheme)
 
   //--- Effect hooks to update refs ---//
   useEffect(() => {
@@ -84,6 +90,10 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
   useEffect(() => {
     undoRef.current = shouldUndo
   }, [shouldUndo])
+
+  useEffect(() => {
+    instrumentThemeRef.current = activeTheme
+  }, [activeTheme])
 
   /**
    * Initializes and manages p5 sketch
@@ -116,6 +126,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
        * Renders the grid background and lines
        */
       const drawGrid = () => {
+        const visualConfig = createVisualConfig(instrumentThemeRef.current)
         const rowHeight = p.height / GRID_ROWS
         const colWidth = p.width / GRID_COLS
 
@@ -126,21 +137,21 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
           p.fill(255, 255, 255)
           p.rect(0, y, p.width, rowHeight)
 
-          p.stroke(...VISUAL_CONFIG.grid.lineColor)
-          p.strokeWeight(VISUAL_CONFIG.grid.lineWeight)
+          p.stroke(...visualConfig.grid.lineColor)
+          p.strokeWeight(visualConfig.grid.lineWeight)
           p.line(0, y, p.width, y)
         }
 
         // Draw center line
-        p.stroke(...VISUAL_CONFIG.grid.majorLineColor)
-        p.strokeWeight(VISUAL_CONFIG.grid.majorLineWeight)
+        p.stroke(...visualConfig.grid.majorLineColor)
+        p.strokeWeight(visualConfig.grid.majorLineWeight)
         p.line(p.width / 2, 0, p.width / 2, p.height)
 
         // Draw vertical lines
         for (let i = 1; i < GRID_COLS; i++) {
           const x = i * colWidth
-          p.stroke(...VISUAL_CONFIG.grid.majorLineColor)
-          p.strokeWeight(VISUAL_CONFIG.grid.majorLineWeight)
+          p.stroke(...visualConfig.grid.majorLineColor)
+          p.strokeWeight(visualConfig.grid.majorLineWeight)
           p.line(x, 0, x, p.height)
         }
       }
@@ -154,8 +165,9 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
         const x = progressRef.current * p.width
         const colWidth = p.width / GRID_COLS
 
+        const visualConfig = createVisualConfig(instrumentThemeRef.current)
         p.noStroke()
-        p.fill(...VISUAL_CONFIG.seekbar.color)
+        p.fill(...visualConfig.seekbar.color)
         p.rect(x - colWidth / 2, 0, colWidth, p.height)
       }
 
@@ -174,9 +186,10 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
           const width = note.duration * p.width
           const height = rowHeight
 
-          p.fill(...VISUAL_CONFIG.note.fill)
-          p.stroke(...VISUAL_CONFIG.note.stroke)
-          p.strokeWeight(VISUAL_CONFIG.note.lineWeight)
+          const visualConfig = createVisualConfig(instrumentThemeRef.current)
+          p.fill(...visualConfig.note.fill)
+          p.stroke(...visualConfig.note.stroke)
+          p.strokeWeight(visualConfig.note.lineWeight)
           p.rect(x, y, width, height)
         }
       }
@@ -187,8 +200,9 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
       const drawCurrentStroke = () => {
         if (currentStroke.length < 2) return
 
-        p.stroke(...VISUAL_CONFIG.stroke.color)
-        p.strokeWeight(VISUAL_CONFIG.stroke.lineWeight)
+        const visualConfig = createVisualConfig(instrumentThemeRef.current)
+        p.stroke(...visualConfig.stroke.color)
+        p.strokeWeight(visualConfig.stroke.lineWeight)
 
         for (let i = 1; i < currentStroke.length; i++) {
           const [x1, y1] = currentStroke[i - 1]
@@ -203,8 +217,9 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
       const drawEraseStrokes = () => {
         if (eraseArr.length === 0) return
 
-        p.stroke(...VISUAL_CONFIG.erase.color)
-        p.strokeWeight(VISUAL_CONFIG.erase.lineWeight)
+        const visualConfig = createVisualConfig(instrumentThemeRef.current)
+        p.stroke(...visualConfig.erase.color)
+        p.strokeWeight(visualConfig.erase.lineWeight)
 
         for (const eraseStroke of eraseArr) {
           for (let i = 1; i < eraseStroke.length; i++) {
@@ -315,7 +330,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
         width: '100%',
         height: '100%',
         background: '#ffffff',
-        border: '1px solid #000000',
+        border: `2px solid ${activeTheme.hex}`,
         borderRadius: '8px',
         overflow: 'hidden',
       }}
@@ -326,8 +341,8 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
           position: 'relative',
           width: '100px',
           flexShrink: 0,
-          background: '#ffffff',
-          borderRight: '2px solid #000000',
+          background: `rgb(${activeTheme.softRgb.join(', ')})`,
+          borderRight: `2px solid ${activeTheme.hex}`,
           display: 'flex',
           flexDirection: 'column',
         }}
@@ -340,6 +355,8 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
             index={index}
             totalNotes={WHITE_NOTES.length}
             hasSharpBelow={HAS_SHARP_BELOW[note]}
+            accentColor={activeTheme.hex}
+            accentBackground={`rgb(${activeTheme.softRgb.join(', ')})`}
           />
         ))}
       </div>
@@ -362,13 +379,13 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
 /**
  * NoteLabelCell - Individual note label in sidebar
  */
-function NoteLabelCell({ note, octave, index, totalNotes, hasSharpBelow }: NoteLabelCellProps) {
+function NoteLabelCell({ note, octave, index, totalNotes, hasSharpBelow, accentColor, accentBackground }: NoteLabelCellProps) {
   return (
     <div
       style={{
         position: 'relative',
         flex: 1,
-        borderBottom: index < totalNotes - 1 ? '1px solid #2a2a3a' : 'none',
+        borderBottom: index < totalNotes - 1 ? `1px solid ${accentColor}` : 'none',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'flex-end',
@@ -382,7 +399,7 @@ function NoteLabelCell({ note, octave, index, totalNotes, hasSharpBelow }: NoteL
           top: '12%',
           bottom: '12%',
           width: '46px',
-          background: '#fff',
+          background: accentBackground,
           display: 'flex',
           alignItems: 'flex-end',
           justifyContent: 'center',
@@ -392,7 +409,7 @@ function NoteLabelCell({ note, octave, index, totalNotes, hasSharpBelow }: NoteL
         <span
           style={{
             fontSize: '12px',
-            color: '#000000',
+            color: accentColor,
             fontWeight: 'normal',
             fontFamily: 'monospace',
           }}
@@ -409,7 +426,7 @@ function NoteLabelCell({ note, octave, index, totalNotes, hasSharpBelow }: NoteL
             right: '0px',
             width: '60px',
             height: '36%',
-            background: '#000',
+            background: accentColor,
             zIndex: 2,
           }}
         />

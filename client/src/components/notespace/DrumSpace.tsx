@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, type MouseEvent, type RefObject } from 'react'
 import * as ctx from '../../contexts/snaptunestatecontext'
-import {Drum, GRID_COLS, Note } from '../../types'
+import { Drum, GRID_COLS, INSTRUMENT_THEMES, Instrument, Note } from '../../types'
 interface DrumSpaceProps {
   progressRef: RefObject<number>
 }
@@ -27,7 +27,8 @@ function createEmptyGrid(): boolean[][] {
 
 export function DrumSpace({ progressRef }: DrumSpaceProps) {
 
-  const {setDrumsComposition } = ctx.useUpdateDrumsComposition();
+  const { setDrumsComposition } = ctx.useUpdateDrumsComposition()
+  const drumTheme = INSTRUMENT_THEMES[Instrument.Drums]
 
   const [grid, setGrid] = useState<boolean[][]>(createEmptyGrid)
   const [mouseDownStep, setMouseDownStep] = useState<boolean | null>(null)
@@ -99,7 +100,7 @@ export function DrumSpace({ progressRef }: DrumSpaceProps) {
         width: '100%',
         height: '100%',
         background: '#ffffff',
-        border: '1px solid #999',
+        border: `2px solid ${drumTheme.hex}`,
         borderRadius: '8px',
         overflow: 'hidden',
         userSelect: 'none',
@@ -111,10 +112,10 @@ export function DrumSpace({ progressRef }: DrumSpaceProps) {
         style={{
           width: '100px',
           flexShrink: 0,
-          borderRight: '2px solid #999',
+          borderRight: `2px solid ${drumTheme.hex}`,
           display: 'flex',
           flexDirection: 'column',
-          background: '#fff',
+          background: `rgb(${drumTheme.softRgb.join(', ')})`,
         }}
       >
         {TRACKS.map((track, index) => (
@@ -185,7 +186,7 @@ export function DrumSpace({ progressRef }: DrumSpaceProps) {
                         isCurrentStep && active
                           ? track.color
                           : isCurrentStep
-                            ? '#c8d4f5'
+                            ? `rgb(${drumTheme.softRgb.join(', ')})`
                             : active
                               ? track.color
                               : stepIdx % 2 === 0
@@ -193,7 +194,7 @@ export function DrumSpace({ progressRef }: DrumSpaceProps) {
                                 : '#e4e4e4',
                       outlineOffset: '-2px',
                       boxShadow: active ? `0 0 6px ${track.color}88` : 'none',
-                      border: active ? `1px solid ${track.color}` : '1px solid #ccc',
+                      border: active ? `1px solid ${track.color}` : `1px solid ${drumTheme.hex}`,
                       transition: 'background 0.08s, box-shadow 0.08s',
                     }}
                   />
@@ -205,7 +206,7 @@ export function DrumSpace({ progressRef }: DrumSpaceProps) {
               style={{
                 width: '2px',
                 flexShrink: 0,
-                background: '#999',
+                background: drumTheme.hex,
                 borderRadius: '2px',
                 margin: '2px 0',
               }}
@@ -235,14 +236,14 @@ export function DrumSpace({ progressRef }: DrumSpaceProps) {
                         isCurrentStep && active
                           ? track.color
                           : isCurrentStep
-                            ? '#c8d4f5'
+                            ? `rgb(${drumTheme.softRgb.join(', ')})`
                             : active
                               ? track.color
                               : stepIdx % 2 === 0
                                 ? '#f0f0f0'
                                 : '#e4e4e4',
                       boxShadow: active ? `0 0 6px ${track.color}88` : 'none',
-                      border: active ? `1px solid ${track.color}` : '1px solid #ccc',
+                      border: active ? `1px solid ${track.color}` : `1px solid ${drumTheme.hex}`,
                       transition: 'background 0.08s, box-shadow 0.08s',
                     }}
                   />
