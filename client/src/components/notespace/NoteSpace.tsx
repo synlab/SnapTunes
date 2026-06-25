@@ -335,11 +335,12 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
 
         const x = progressRef.current * p.width
         const colWidth = p.width / GRID_COLS
+        const barWidth = colWidth / 10;
 
         const visualConfig = createVisualConfig(instrumentThemeRef.current)
         p.noStroke()
         p.fill(...visualConfig.seekbar.color)
-        p.rect(x - colWidth / 2, 0, colWidth, p.height)
+        p.rect(x - barWidth / 2, 0, barWidth, p.height)
       }
 
       /**
