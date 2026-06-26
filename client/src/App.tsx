@@ -111,22 +111,45 @@ function App() {
       true
     )
 
+    const syncConnectionState = (): void => {
+      const socket = ServerSocketService.Connection
+      setConnectedToServer(!!socket?.connected)
+      if (!socket?.connected) {
+        setSnapBorders([])
+        setMusicGroupState(null)
+      }
+    }
+
     const onConnect = (): void => {
       console.log('Connected to SimSnap server');
-      setConnectedToServer(true)
+      syncConnectionState()
       requestDeviceMotionPermission();
     }
 
     const onDisconnect = (reason: string): void => {
       console.log(`Disconnected from SimSnap server: ${reason}`)
-      setConnectedToServer(false)
-      setSnapBorders([])
-      setMusicGroupState(null)
+      syncConnectionState()
     }
 
-    const onConnectError = (): void => {
-      setConnectedToServer(false)
-      setSnapBorders([])
+    const onConnectError = (error: Error): void => {
+      console.log(`Connection error: ${error.message}`)
+      syncConnectionState()
+    }
+
+    const onReconnectAttempt = (): void => {
+      syncConnectionState()
+    }
+
+    const onReconnect = (): void => {
+      syncConnectionState()
+    }
+
+    const onReconnectError = (): void => {
+      syncConnectionState()
+    }
+
+    const onReconnectFailed = (): void => {
+      syncConnectionState()
     }
 
     const onClientSize = (event: { width: number; height: number }): void => {
@@ -174,8 +197,8 @@ function App() {
     }
 
     const onConnectedToServer = (isConnected: boolean): void => {
-      setConnectedToServer(isConnected)
-      if (!isConnected) {
+      setConnectedToServer(isConnected && ServerSocketService.Connection.connected)
+      if (!isConnected || !ServerSocketService.Connection.connected) {
         setSnapBorders([])
         setMusicGroupState(null)
       }
@@ -186,12 +209,18 @@ function App() {
     ServerSocketService.Connection.on('connect', onConnect)
     ServerSocketService.Connection.on('disconnect', onDisconnect)
     ServerSocketService.Connection.on('connect_error', onConnectError)
+    ServerSocketService.Connection.io.on('reconnect_attempt', onReconnectAttempt)
+    ServerSocketService.Connection.io.on('reconnect', onReconnect)
+    ServerSocketService.Connection.io.on('reconnect_error', onReconnectError)
+    ServerSocketService.Connection.io.on('reconnect_failed', onReconnectFailed)
     ServerSocketService.Connection.on('clientSize', onClientSize)
     ServerSocketService.Connection.on('snapBorder', onSnapBorder)
     ServerSocketService.Connection.on('unSnapBorder', onUnsnapBorder)
     ServerSocketService.Connection.on('shake', onShake)
     ServerSocketService.Connection.on('musicGroupState', onMusicGroupState)
     ServerSocketService.Connection.on('connectedToServer', onConnectedToServer)
+
+    syncConnectionState()
 
 
     const onPointerPress = (event: PointerEvent): void => {
@@ -225,6 +254,10 @@ function App() {
       ServerSocketService.Connection.off('connect', onConnect)
       ServerSocketService.Connection.off('disconnect', onDisconnect)
       ServerSocketService.Connection.off('connect_error', onConnectError)
+      ServerSocketService.Connection.io.off('reconnect_attempt', onReconnectAttempt)
+      ServerSocketService.Connection.io.off('reconnect', onReconnect)
+      ServerSocketService.Connection.io.off('reconnect_error', onReconnectError)
+      ServerSocketService.Connection.io.off('reconnect_failed', onReconnectFailed)
       ServerSocketService.Connection.off('clientSize', onClientSize)
       ServerSocketService.Connection.off('musicGroupState', onMusicGroupState)
       ServerSocketService.Connection.off('connectedToServer', onConnectedToServer)
