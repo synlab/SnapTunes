@@ -6,7 +6,7 @@ import { ControlPanel } from './components/ControlPanel'
 import * as ctx from './contexts/snaptunestatecontext'
 import { ServerSocketService } from 'simsnap-core'
 import './App.css'
-import { GRID_COLS, Instrument, Note } from './types'
+import { GRID_COLS, Instrument, MusicGroupStatePayload, Note } from './types'
 import * as Tone from 'tone';
 import { MovementManagerDeviceEvent } from 'simsnap-core/src/entities/VirtualRoom/MovementManager'
 
@@ -40,6 +40,8 @@ function App() {
   
 
   const [snapBorders, setSnapBorders] = useState<SnapBorder[]>([])
+  const [musicGroupState, setMusicGroupState] = useState<MusicGroupStatePayload | null>(null)
+  const [connectedToServer, setConnectedToServer] = useState<boolean>(false)
   const [volume, setVolume] = useState<number>(-20)
   const [permissionGranted, setPermissionGranted] = useState<Boolean>(false)
 
@@ -111,7 +113,20 @@ function App() {
 
     const onConnect = (): void => {
       console.log('Connected to SimSnap server');
+      setConnectedToServer(true)
       requestDeviceMotionPermission();
+    }
+
+    const onDisconnect = (reason: string): void => {
+      console.log(`Disconnected from SimSnap server: ${reason}`)
+      setConnectedToServer(false)
+      setSnapBorders([])
+      setMusicGroupState(null)
+    }
+
+    const onConnectError = (): void => {
+      setConnectedToServer(false)
+      setSnapBorders([])
     }
 
     const onClientSize = (event: { width: number; height: number }): void => {
@@ -154,13 +169,29 @@ function App() {
       requestClear(activeInstrument === Instrument.Drums ? 'drums' : 'melodic');
     }
 
+    const onMusicGroupState = (payload: MusicGroupStatePayload): void => {
+      setMusicGroupState(payload)
+    }
+
+    const onConnectedToServer = (isConnected: boolean): void => {
+      setConnectedToServer(isConnected)
+      if (!isConnected) {
+        setSnapBorders([])
+        setMusicGroupState(null)
+      }
+    }
+
 
 
     ServerSocketService.Connection.on('connect', onConnect)
+    ServerSocketService.Connection.on('disconnect', onDisconnect)
+    ServerSocketService.Connection.on('connect_error', onConnectError)
     ServerSocketService.Connection.on('clientSize', onClientSize)
     ServerSocketService.Connection.on('snapBorder', onSnapBorder)
     ServerSocketService.Connection.on('unSnapBorder', onUnsnapBorder)
     ServerSocketService.Connection.on('shake', onShake)
+    ServerSocketService.Connection.on('musicGroupState', onMusicGroupState)
+    ServerSocketService.Connection.on('connectedToServer', onConnectedToServer)
 
 
     const onPointerPress = (event: PointerEvent): void => {
@@ -192,7 +223,11 @@ function App() {
       ServerSocketService.Connection.off('snapBorder', onSnapBorder)
       ServerSocketService.Connection.off('unSnapBorder', onUnsnapBorder)
       ServerSocketService.Connection.off('connect', onConnect)
+      ServerSocketService.Connection.off('disconnect', onDisconnect)
+      ServerSocketService.Connection.off('connect_error', onConnectError)
       ServerSocketService.Connection.off('clientSize', onClientSize)
+      ServerSocketService.Connection.off('musicGroupState', onMusicGroupState)
+      ServerSocketService.Connection.off('connectedToServer', onConnectedToServer)
       ServerSocketService.emit('destroy', undefined);
       containerRef.current!.onpointerdown = null;
       containerRef.current!.onpointermove = null;
@@ -402,7 +437,7 @@ function App() {
         </ctx.UndoContextProvider>
       </ctx.DrawStateContextProvider>
 
-      {snapBorders.map((border) => (
+      {connectedToServer && snapBorders.map((border) => (
         <div
           key={border.id}
           style={{
@@ -415,6 +450,66 @@ function App() {
           }}
         />
       ))}
+
+      <div
+        style={{
+          position: 'absolute',
+          right: '8px',
+          top: '5px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          padding: '6px 8px',
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          color: '#ffffff',
+          fontSize: '11px',
+          lineHeight: 1.25,
+          fontFamily: 'monospace',
+          borderRadius: '4px',
+          zIndex: 10,
+          pointerEvents: 'none',
+        }}
+      >
+        <span
+          style={{
+            width: '8px',
+            height: '8px',
+            borderRadius: '999px',
+            backgroundColor: connectedToServer ? '#35d071' : '#e45050',
+            display: 'inline-block',
+          }}
+        />
+        server: {connectedToServer ? 'connected' : 'disconnected'}
+      </div>
+
+      {(() => {
+        const selfDeviceId = musicGroupState?.selfDeviceId
+        const selfState = selfDeviceId ? musicGroupState?.devices[selfDeviceId] : undefined
+        const groupLabel = selfState?.groupId ?? 'none'
+        const positionLabel = selfState?.position ? `[col: ${selfState.position.col}, row: ${selfState.position.row}]` : 'n/a'
+
+        return (
+          <div
+            style={{
+              position: 'absolute',
+              left: '8px',
+              top: '8px',
+              padding: '6px 8px',
+              backgroundColor: 'rgba(0, 0, 0, 0.7)',
+              color: '#ffffff',
+              fontSize: '11px',
+              lineHeight: 1.25,
+              fontFamily: 'monospace',
+              borderRadius: '4px',
+              zIndex: 10,
+              pointerEvents: 'none',
+            }}
+          >
+            group: {groupLabel}<br />
+            pos: {positionLabel}
+          </div>
+        )
+      })()}
     </div>
   )
 }

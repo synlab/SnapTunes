@@ -39,3 +39,14 @@ ioServer.on('connection', (socket) => {
     console.log(`Client disconnected: ${socket.id}`);
   });
 });
+
+const shutdown = (signal: NodeJS.Signals) => {
+  console.log(`Received ${signal}, notifying clients before shutdown.`);
+  ioServer.emit('connectedToServer', false);
+  server.close(() => {
+    process.exit(0);
+  });
+};
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));

@@ -95,3 +95,23 @@ export class Note implements NoteData {
     this.duration = duration // 0-1, representing position on the timeline
   }
 }
+
+export interface GroupGridPosition {
+  col: number
+  row: number
+}
+
+export interface MusicGroupDeviceState {
+  groupId: string | null
+  position: GroupGridPosition | null
+}
+
+export interface MusicGroupStatePayload {
+  selfDeviceId: string
+  updatedAt: string
+  groups: Array<{
+    id: string
+    steps: string[][]
+  }>
+  devices: Record<string, MusicGroupDeviceState>
+}

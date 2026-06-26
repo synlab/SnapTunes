@@ -12,7 +12,12 @@ export class MusicClientSocketService extends ClientSocketService{
         super(clientSocket, virtualRoom, device);
         this.device.client = this;
         console.log(`🔌 New client connected: ${clientSocket.id}`);
-        this.device.addEventListener('shake', this.shake.bind(this))
+        this.device.addEventListener('shake', this.shake.bind(this));
+        this.emitConnectedToServer(true);
+    }
+
+    emitConnectedToServer(isConnected: boolean) {
+        this.clientSocket.emit('connectedToServer', isConnected);
     }
    
 
