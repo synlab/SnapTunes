@@ -77,12 +77,22 @@ interface SFXUpdateContextValue {
   setSfx: Dispatch<SetStateAction<unknown>>
 }
 
+export type ClearTarget = 'melodic' | 'drums' | 'all'
+
+interface ClearSignal {
+  // Monotonic event id. Incrementing this guarantees each clear request is observable,
+  // even when two consecutive requests target the same instrument.
+  seq: number
+  // Which composition domain should react to this clear request.
+  target: ClearTarget
+}
+
 interface ClearContextValue {
-  clear: boolean
+  clearSignal: ClearSignal
 }
 
 interface ClearUpdateContextValue {
-  setClear: Dispatch<SetStateAction<boolean>>
+  requestClear: (target?: ClearTarget) => void
 }
 
 interface ProviderProps {
@@ -236,11 +246,17 @@ export const SFXContextProvider = ({ children }: ProviderProps) => {
 }
 
 export const ClearContextProvider = ({ children }: ProviderProps) => {
-  const [clear, setClear] = useState<boolean>(false)
+  // Clear requests are modeled as events (seq + target), not a boolean toggle.
+  const [clearSignal, setClearSignal] = useState<ClearSignal>({ seq: 0, target: 'all' })
+
+  const requestClear = (target: ClearTarget = 'all') => {
+    // Emit a new clear event by bumping seq.
+    setClearSignal((prev) => ({ seq: prev.seq + 1, target }))
+  }
 
   return (
-    <ClearContext.Provider value={{ clear }}>
-      <UpdateClearContext.Provider value={{ setClear }}>
+    <ClearContext.Provider value={{ clearSignal }}>
+      <UpdateClearContext.Provider value={{ requestClear }}>
         {children}
       </UpdateClearContext.Provider>
     </ClearContext.Provider>

@@ -10,7 +10,7 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
     constructor(ioServer: Server, override virtualRoom: VirtualRoom = new VirtualRoom()) {
         super('', ioServer, virtualRoom, (clientSocket) => new MusicClientSocketService(clientSocket, virtualRoom));
         this.virtualRoom.movementManager?.configure(
-            2000, // 2s window
+            1000, // 1s window
             400,  // 0,4s cooldown
             12    // 12 m/s² minimum
         );

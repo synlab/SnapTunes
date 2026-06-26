@@ -7,6 +7,7 @@ import DeleteSweepRoundedIcon from '@mui/icons-material/DeleteSweepRounded'
 import LibraryMusicRoundedIcon from '@mui/icons-material/LibraryMusicRounded'
 import { LuEraser } from 'react-icons/lu'
 import * as ctx from '../contexts/snaptunestatecontext'
+import { Instrument } from '../types'
 
 const TOOLS = { DRAW: 'draw', ERASE: 'erase' } as const
 
@@ -38,8 +39,9 @@ interface ActionButtonProps {
 
 export function ControlPanel() {
   const { setUndo } = ctx.useUpdateUndo()
-  const { setClear } = ctx.useUpdateClear()
+  const { requestClear } = ctx.useUpdateClear()
   const { setDrawState } = ctx.useUpdateDrawState()
+  const { instrument } = ctx.useInstrument()
 
   const [activeTool, setActiveTool] = useState<(typeof TOOLS)[keyof typeof TOOLS]>(TOOLS.DRAW)
   const [chordMenuOpen, setChordMenuOpen] = useState<boolean>(false)
@@ -177,7 +179,7 @@ export function ControlPanel() {
             actionBtn({
               icon: <DeleteSweepRoundedIcon fontSize="small" />,
               label: 'Erase All',
-              onClick: () => setClear(true),
+              onClick: () => requestClear(instrument === Instrument.Drums ? 'drums' : 'melodic'),
             })
           }
 

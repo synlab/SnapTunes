@@ -81,8 +81,7 @@ const createVisualConfig = (theme: InstrumentTheme) => ({
 export function NoteSpace({ progressRef }: NoteSpaceProps) {
   //--- Context hooks ---//
   const { drawState } = ctx.useDrawState()
-  const { clear: shouldClear } = ctx.useClear()
-  const { setClear } = ctx.useUpdateClear()
+  const { clearSignal } = ctx.useClear()
   const { undo: shouldUndo } = ctx.useUndo()
   const { setUndo } = ctx.useUpdateUndo()
   const { composition } = ctx.useComposition()
@@ -108,7 +107,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
 
   // Refs to sync context state with p5 sketch without remounting
   const drawStateRef = useRef<boolean>(drawState)
-  const clearRef = useRef<boolean>(shouldClear)
+  const clearSignalRef = useRef(clearSignal)
   const undoRef = useRef<boolean>(shouldUndo)
   const instrumentThemeRef = useRef<InstrumentTheme>(activeTheme)
 
@@ -118,8 +117,8 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
   }, [drawState])
 
   useEffect(() => {
-    clearRef.current = shouldClear
-  }, [shouldClear])
+    clearSignalRef.current = clearSignal
+  }, [clearSignal])
 
   useEffect(() => {
     undoRef.current = shouldUndo
@@ -139,6 +138,8 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
     const sketch = (p: P5Instance) => {
       const LONG_PRESS_MS = 400
       const LONG_PRESS_MOVE_TOLERANCE_PX = 10
+      const isMelodicClearTarget = (target: ctx.ClearTarget): boolean =>
+        target === 'all' || target === 'melodic'
       let compositionTemp: Note[] = composition// Master array of notes
       let eraseArr: StrokePoint[][] = [] // Erase strokes (visual only)
       let currentStroke: StrokePoint[] = [] // Stroke being drawn now (erase mode)
@@ -146,6 +147,8 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
       let drawGesture: DrawGesture | null = null
       let pendingLongPressDrag: PendingLongPressDrag | null = null
       let activeDraggedNote: ActiveDraggedNote | null = null
+      // Tracks the last clear event consumed by this sketch instance.
+      let lastHandledClearSeq = clearSignalRef.current.seq
 
       const clearLongPressTimer = () => {
         if (!longPressTimerRef.current) return
@@ -474,12 +477,17 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
       * Main draw loop
       */
       p.draw = () => {
-        if (clearRef.current) {
-          compositionTemp = []
-          currentStroke = []
-          drawGesture = null
-          clearDragAndDropState()
-          setClear(false)
+        const latestClearSignal = clearSignalRef.current
+        if (latestClearSignal.seq !== lastHandledClearSeq) {
+          lastHandledClearSeq = latestClearSignal.seq
+          if (isMelodicClearTarget(latestClearSignal.target)) {
+            // Consume this clear event exactly once for melodic notes.
+            compositionTemp = []
+            currentStroke = []
+            drawGesture = null
+            clearDragAndDropState()
+            setComposition([])
+          }
         }
 
         if (undoRef.current) {
@@ -700,7 +708,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
         p5Ref.current = null
       }
     }
-  }, [progressRef, setClear, setUndo])
+  }, [progressRef, setComposition, setUndo])
 
 
   return (

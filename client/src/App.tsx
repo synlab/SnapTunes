@@ -29,18 +29,23 @@ function App() {
   const { composition } = ctx.useComposition()
   const { drumsComposition } = ctx.useDrumsComposition()
   const { octave } = ctx.useOctave()
-  const { setClear } = ctx.useUpdateClear();
+  const { requestClear } = ctx.useUpdateClear();
 
   // const containerRef = useRef<HTMLDivElement>(null)
   const progressRef = useRef<number>(0)
   const animFrameRef = useRef<number | null>(null)
   const startTimeRef = useRef<number | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const instrumentRef = useRef<Instrument | null>(instrument)
   
 
   const [snapBorders, setSnapBorders] = useState<SnapBorder[]>([])
   const [volume, setVolume] = useState<number>(-20)
   const [permissionGranted, setPermissionGranted] = useState<Boolean>(false)
+
+  useEffect(() => {
+    instrumentRef.current = instrument
+  }, [instrument])
 
   const requestDeviceMotionPermission = async () => {
         if (typeof (DeviceMotionEvent as any).requestPermission === 'function') {
@@ -144,7 +149,9 @@ function App() {
 
     const onShake = (data: MovementManagerDeviceEvent): void => {
       console.log(`🫨 Shake event received from device ${data.device.id.value}`);
-      setClear(true);
+      const activeInstrument = instrumentRef.current
+      // Emit a targeted clear event for the currently active instrument family.
+      requestClear(activeInstrument === Instrument.Drums ? 'drums' : 'melodic');
     }
 
 
@@ -191,7 +198,7 @@ function App() {
       containerRef.current!.onpointermove = null;
       containerRef.current!.onpointerup = null;
     }
-  }, [''])
+  }, [])
 
   const [loadedInstruments, setLoadedInstruments] = useState<Record<Instrument, boolean>>({
     [Instrument.Piano]: false,

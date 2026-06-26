@@ -18,22 +18,49 @@ const TRACKS: Track[] = [
 ]
 
 const STEPS = GRID_COLS
-const STEPS_PER_MEASURE = STEPS/2
+const STEPS_PER_MEASURE = STEPS / 2
 
-function createEmptyGrid(): boolean[][] {
-  //TODO: Add grid construction from existing drums composition
-  return TRACKS.map(() => Array(STEPS).fill(false))
+function initGrid(composition: Note[]): boolean[][] {
+  const grid: boolean[][] = TRACKS.map(() => Array(STEPS).fill(false))
+  if (composition && composition.length > 0) {
+
+    for (const note of composition) {
+      const trackIdx = Object.values(Drum).indexOf(note.pitch as Drum)
+      const stepIdx = Math.floor(note.startTime * STEPS)
+      if (trackIdx >= 0 && stepIdx >= 0 && stepIdx < STEPS) {
+        grid[trackIdx][stepIdx] = true
+      }
+    }
+  }
+
+  return grid
+
 }
+
 
 export function DrumSpace({ progressRef }: DrumSpaceProps) {
 
+  const { drumsComposition } = ctx.useDrumsComposition()
   const { setDrumsComposition } = ctx.useUpdateDrumsComposition()
+  const { clearSignal } = ctx.useClear()
+
   const drumTheme = INSTRUMENT_THEMES[Instrument.Drums]
 
-  const [grid, setGrid] = useState<boolean[][]>(createEmptyGrid)
+  const [grid, setGrid] = useState<boolean[][]>(initGrid(drumsComposition))
   const [mouseDownStep, setMouseDownStep] = useState<boolean | null>(null)
   const [currentStep, setCurrentStep] = useState<number | null>(null)
   const animRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    // Ignore clear events that are not meant for drums.
+    if (clearSignal.target !== 'all' && clearSignal.target !== 'drums') return
+    // seq=0 is the provider's initial value, not a real clear request.
+    if (clearSignal.seq === 0) return
+
+    // A new matching clear event was emitted, so reset both state layers.
+    setDrumsComposition([])
+    setGrid(initGrid([]))
+  }, [clearSignal, setDrumsComposition])
 
   // Poll progressRef on every animation frame to update the highlighted step
   useEffect(() => {
@@ -56,12 +83,12 @@ export function DrumSpace({ progressRef }: DrumSpaceProps) {
   }, [progressRef])
 
   //Rebuild drums composition from boolean grid
-  useEffect(()=>{
+  useEffect(() => {
     let newComposition: Note[] = [];
-    for(let i=0; i<grid.length; i++){
-      for(let j=0; j<grid[i].length; j++){
-        if(grid[i][j]){
-          newComposition.push(new Note(Object.values(Drum)[i], j/grid[i].length , 1/STEPS))
+    for (let i = 0; i < grid.length; i++) {
+      for (let j = 0; j < grid[i].length; j++) {
+        if (grid[i][j]) {
+          newComposition.push(new Note(Object.values(Drum)[i], j / grid[i].length, 1 / STEPS))
         }
       }
     }
