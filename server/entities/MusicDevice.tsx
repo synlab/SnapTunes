@@ -9,13 +9,9 @@ export class MusicDevice extends CanvasDevice {
     // Cached coordinate in the group's [col,row] composition layout.
     public groupGridPosition: GroupGridPosition | null = null;
 
-    constructor(anchorPriority: number | null = null){
+    constructor(anchorPriority: number | null = null) {
         super(undefined, undefined, undefined, anchorPriority, 'musicDevice');
     }
-
-
-
-
 }
 
 export default MusicDevice;

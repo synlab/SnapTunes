@@ -112,6 +112,77 @@ export interface MusicGroupStatePayload {
   groups: Array<{
     id: string
     steps: string[][]
+    sharedBpm: number
   }>
   devices: Record<string, MusicGroupDeviceState>
+}
+
+// Shared group playback uses a fixed BPM for now so every device in a column
+// computes the same transport duration even if their standalone BPM differs.
+export const MUSIC_GROUP_SHARED_BPM = 120
+
+export type MusicGroupResetReason = 'stop' | 'naturalEnd' | 'topologyChange'
+
+export interface MusicGroupClockSyncRequest {
+  requestId: string
+  clientSentAtMs: number
+}
+
+export interface MusicGroupClockSyncResponse {
+  requestId: string
+  clientSentAtMs: number
+  serverTimeMs: number
+}
+
+export interface MusicGroupPlaybackCommand {
+  requestId: string
+}
+
+export interface MusicGroupColumnScheduledPayload {
+  groupId: string
+  columnIndex: number
+  resumePositionMs: number
+  scheduledStartTimeMs: number
+  scheduleToken: number
+  sharedBpm: number
+}
+
+export interface MusicGroupColumnFinishedPayload {
+  groupId: string
+  columnIndex: number
+  scheduleToken: number
+}
+
+export interface MusicGroupPauseCapturePayload {
+  groupId: string
+  columnIndex: number
+  requestId: string
+  scheduleToken: number
+}
+
+export interface MusicGroupPauseReportPayload {
+  groupId: string
+  requestId: string
+  scheduleToken: number
+  positionMs: number
+}
+
+export interface MusicGroupPausedPayload {
+  groupId: string
+  columnIndex: number
+  pausedPositionMs: number
+  scheduleToken: number
+}
+
+export interface MusicGroupCancelScheduledStartPayload {
+  groupId: string
+  columnIndex: number
+  scheduleToken: number
+  reason: Exclude<MusicGroupResetReason, 'naturalEnd'>
+}
+
+export interface MusicGroupResetPayload {
+  groupId: string
+  reason: MusicGroupResetReason
+  sequence: number
 }

@@ -3,10 +3,30 @@ import { TopBar } from './components/topbar/TopBar'
 import { NoteSpace } from './components/notespace/NoteSpace'
 import { DrumSpace } from './components/notespace/DrumSpace'
 import { ControlPanel } from './components/ControlPanel'
+import { ServerStatusOverlay } from './components/overlays/ServerStatusOverlay'
+import { GroupStatusOverlay } from './components/overlays/GroupStatusOverlay'
+import { GroupDebugOverlay } from './components/overlays/GroupDebugOverlay'
 import * as ctx from './contexts/snaptunestatecontext'
 import { ServerSocketService } from 'simsnap-core'
 import './App.css'
-import { GRID_COLS, Instrument, MusicGroupStatePayload, Note } from './types'
+import {
+  Instrument,
+  MUSIC_GROUP_SHARED_BPM,
+  MusicGroupCancelScheduledStartPayload,
+  MusicGroupClockSyncRequest,
+  MusicGroupClockSyncResponse,
+  MusicGroupColumnFinishedPayload,
+  MusicGroupColumnScheduledPayload,
+  MusicGroupPauseCapturePayload,
+  MusicGroupPauseReportPayload,
+  MusicGroupPausedPayload,
+  MusicGroupPlaybackCommand,
+  MusicGroupResetPayload,
+  MusicGroupStatePayload,
+  Note,
+} from './types'
+import { generateRequestId, getCompositionDurationMs, getCompositionDurationSec } from './app/playbackUtils'
+import { useSamplerTransport } from './app/useSamplerTransport'
 import * as Tone from 'tone';
 import { MovementManagerDeviceEvent } from 'simsnap-core/src/entities/VirtualRoom/MovementManager'
 
@@ -21,6 +41,33 @@ interface SnapBorder {
   position: string
 }
 
+interface SelfGroupContext {
+  groupId: string | null
+  columnIndex: number | null
+  sharedBpm: number | null
+}
+
+interface ActiveGroupedSchedule {
+  groupId: string
+  columnIndex: number
+  scheduleToken: number
+  sharedBpm: number
+}
+
+// Temporary grouped-playback diagnostics. Remove this flag and the matching
+// overlay block when multi-device testing is finished.
+const SHOW_GROUP_PLAYBACK_DEBUG_OVERLAY = true
+const CLOCK_SYNC_INTERVAL_MS = 5000
+
+interface GroupPlaybackDebugSnapshot {
+  groupId: string | null
+  columnIndex: number | null
+  scheduleToken: number | null
+  serverClockOffsetMs: number
+}
+
+type GroupControlCommand = 'play' | 'pause' | 'stop'
+
 function App() {
   const { instrument } = ctx.useInstrument()
   const { playback } = ctx.usePlayback()
@@ -31,23 +78,493 @@ function App() {
   const { octave } = ctx.useOctave()
   const { requestClear } = ctx.useUpdateClear();
 
-  // const containerRef = useRef<HTMLDivElement>(null)
   const progressRef = useRef<number>(0)
   const animFrameRef = useRef<number | null>(null)
   const startTimeRef = useRef<number | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const instrumentRef = useRef<Instrument | null>(instrument)
+  const compositionRef = useRef<Note[]>(composition)
+  const drumsCompositionRef = useRef<Note[]>(drumsComposition)
+  const octaveRef = useRef<number>(octave)
+  const selfGroupContextRef = useRef<SelfGroupContext>({ groupId: null, columnIndex: null, sharedBpm: null })
+  const serverClockOffsetMsRef = useRef<number>(0)
+  const pendingClockRequestsRef = useRef<Map<string, number>>(new Map<string, number>())
+  const clockSyncIntervalRef = useRef<number | null>(null)
+  const bestClockSyncRttMsRef = useRef<number | null>(null)
+  const pendingGroupedStartTimerRef = useRef<number | null>(null)
+  const pendingGroupedStartTokenRef = useRef<number | null>(null)
+  const activeGroupedScheduleRef = useRef<ActiveGroupedSchedule | null>(null)
   
 
   const [snapBorders, setSnapBorders] = useState<SnapBorder[]>([])
   const [musicGroupState, setMusicGroupState] = useState<MusicGroupStatePayload | null>(null)
   const [connectedToServer, setConnectedToServer] = useState<boolean>(false)
   const [volume, setVolume] = useState<number>(-20)
-  const [permissionGranted, setPermissionGranted] = useState<Boolean>(false)
+  const [permissionGranted, setPermissionGranted] = useState<boolean>(false)
+  const [groupCommandPending, setGroupCommandPending] = useState<GroupControlCommand | null>(null)
+  const [audioContextUnlocked, setAudioContextUnlocked] = useState<boolean>(false)
+  const [groupPlaybackDebugSnapshot, setGroupPlaybackDebugSnapshot] = useState<GroupPlaybackDebugSnapshot>({
+    groupId: null,
+    columnIndex: null,
+    scheduleToken: null,
+    serverClockOffsetMs: 0,
+  })
+  const groupCommandTimeoutRef = useRef<number | null>(null)
+  const groupCommandPendingRef = useRef<GroupControlCommand | null>(null)
+
+  const { constructComposition } = useSamplerTransport({
+    instrumentRef,
+    compositionRef,
+    drumsCompositionRef,
+    octaveRef,
+  })
+
+  const selfDeviceId = musicGroupState?.selfDeviceId ?? null
+  const selfDeviceState = selfDeviceId ? musicGroupState?.devices[selfDeviceId] : undefined
+  const currentGroup = selfDeviceState?.groupId
+    ? musicGroupState?.groups.find((group) => group.id === selfDeviceState.groupId) ?? null
+    : null
+  const isGrouped = !!selfDeviceState?.groupId && !!selfDeviceState.position && !!currentGroup
+  const playbackBpm = currentGroup?.sharedBpm ?? bpm
 
   useEffect(() => {
     instrumentRef.current = instrument
   }, [instrument])
+
+  useEffect(() => {
+    compositionRef.current = composition
+  }, [composition])
+
+  useEffect(() => {
+    drumsCompositionRef.current = drumsComposition
+  }, [drumsComposition])
+
+  useEffect(() => {
+    octaveRef.current = octave
+  }, [octave])
+
+  useEffect(() => {
+    groupCommandPendingRef.current = groupCommandPending
+  }, [groupCommandPending])
+
+  useEffect(() => {
+    selfGroupContextRef.current = {
+      groupId: selfDeviceState?.groupId ?? null,
+      columnIndex: selfDeviceState?.position?.col ?? null,
+      sharedBpm: currentGroup?.sharedBpm ?? null,
+    }
+  }, [currentGroup, selfDeviceState])
+
+  useEffect(() => {
+    // Entering or leaving a group invalidates any local playback timeline. We
+    // stop immediately so grouped playback can restart from the server-owned state.
+    if (!musicGroupState) {
+      return
+    }
+
+    clearPendingGroupedStart()
+    stopTransportPlayback(true)
+    clearGroupCommandPending()
+    setPlayback(0)
+  }, [musicGroupState, setPlayback])
+
+  useEffect(() => {
+    // Shared playback may be started by a server event instead of a direct click,
+    // so we pre-warm Tone on the first user gesture to satisfy autoplay policies.
+    const unlockOnGesture = (): void => {
+      void ensureAudioContextRunning()
+    }
+
+    window.addEventListener('pointerdown', unlockOnGesture, { passive: true })
+    window.addEventListener('keydown', unlockOnGesture)
+
+    return () => {
+      window.removeEventListener('pointerdown', unlockOnGesture)
+      window.removeEventListener('keydown', unlockOnGesture)
+    }
+  }, [])
+
+  const cancelAnimationLoop = (): void => {
+    if (animFrameRef.current !== null) {
+      cancelAnimationFrame(animFrameRef.current)
+      animFrameRef.current = null
+    }
+  }
+
+  const clearPendingGroupedStart = (): void => {
+    if (pendingGroupedStartTimerRef.current !== null) {
+      window.clearTimeout(pendingGroupedStartTimerRef.current)
+      pendingGroupedStartTimerRef.current = null
+    }
+
+    pendingGroupedStartTokenRef.current = null
+  }
+
+  const clearGroupCommandPending = (): void => {
+    if (groupCommandTimeoutRef.current !== null) {
+      window.clearTimeout(groupCommandTimeoutRef.current)
+      groupCommandTimeoutRef.current = null
+    }
+
+    groupCommandPendingRef.current = null
+    setGroupCommandPending(null)
+  }
+
+  const markGroupCommandPending = (command: GroupControlCommand): void => {
+    clearGroupCommandPending()
+    groupCommandPendingRef.current = command
+    setGroupCommandPending(command)
+
+    // Safety guard: never leave controls locked forever if an ack event is lost.
+    groupCommandTimeoutRef.current = window.setTimeout(() => {
+      console.warn(`Timed out waiting for shared ${command} acknowledgement`)
+      clearGroupCommandPending()
+    }, 5000)
+  }
+
+  const ensureAudioContextRunning = async (): Promise<boolean> => {
+    try {
+      await Tone.start()
+      await Tone.getContext().rawContext.resume()
+      const isRunning = Tone.getContext().state === 'running'
+      setAudioContextUnlocked(isRunning)
+
+      if (!isRunning) {
+        console.warn('AudioContext is not running after resume attempt', {
+          state: Tone.getContext().state,
+        })
+      }
+
+      return isRunning
+    } catch (error) {
+      setAudioContextUnlocked(false)
+      console.error('Failed to unlock AudioContext', error)
+      return false
+    }
+  }
+
+  const resetTransportForSharedPlayback = (): void => {
+    // Shared playback must start from a clean transport state on every device.
+    Tone.getTransport().stop()
+    Tone.getTransport().position = 0
+    Tone.getTransport().cancel()
+  }
+
+  const syncGroupPlaybackDebugSnapshot = (overrides: Partial<GroupPlaybackDebugSnapshot> = {}): void => {
+    if (!SHOW_GROUP_PLAYBACK_DEBUG_OVERLAY) {
+      return
+    }
+
+    const currentSchedule = activeGroupedScheduleRef.current
+    setGroupPlaybackDebugSnapshot({
+      groupId: currentSchedule?.groupId ?? selfGroupContextRef.current.groupId,
+      columnIndex: currentSchedule?.columnIndex ?? selfGroupContextRef.current.columnIndex,
+      scheduleToken: currentSchedule?.scheduleToken ?? pendingGroupedStartTokenRef.current,
+      serverClockOffsetMs: serverClockOffsetMsRef.current,
+      ...overrides,
+    })
+  }
+
+  const stopTransportPlayback = (resetCursor: boolean): void => {
+    Tone.getTransport().pause()
+    cancelAnimationLoop()
+
+    if (resetCursor) {
+      resetTransportForSharedPlayback()
+      progressRef.current = 0
+      startTimeRef.current = null
+      activeGroupedScheduleRef.current = null
+      syncGroupPlaybackDebugSnapshot({ scheduleToken: null, columnIndex: null })
+    }
+  }
+
+  const runProgressLoop = (totalMs: number, onComplete: () => void): void => {
+    const tick = (now: number): void => {
+      const startTime = startTimeRef.current
+      if (startTime === null) return
+
+      const elapsed = now - startTime
+      const progress = elapsed / totalMs
+
+      if (progress >= 1) {
+        progressRef.current = 1
+        onComplete()
+        return
+      }
+
+      progressRef.current = progress
+      animFrameRef.current = requestAnimationFrame(tick)
+    }
+
+    animFrameRef.current = requestAnimationFrame(tick)
+  }
+
+  const startTransportPlayback = async (
+    targetBpm: number,
+    startProgress: number,
+    onComplete: () => void
+  ): Promise<void> => {
+    const totalDurationSec = getCompositionDurationSec(targetBpm)
+    const totalMs = totalDurationSec * 1000
+
+    const isAudioReady = await ensureAudioContextRunning()
+    if (!isAudioReady) {
+      throw new Error('AudioContext is suspended; shared playback start aborted')
+    }
+
+    resetTransportForSharedPlayback()
+    constructComposition(totalDurationSec)
+    Tone.getTransport().seconds = startProgress * totalDurationSec
+    Tone.getTransport().start()
+
+    startTimeRef.current = performance.now() - startProgress * totalMs
+    runProgressLoop(totalMs, onComplete)
+  }
+
+  const requestClockSync = (): void => {
+    const requestId = generateRequestId()
+    const clientSentAtMs = Date.now()
+    const payload: MusicGroupClockSyncRequest = { requestId, clientSentAtMs }
+
+    pendingClockRequestsRef.current.set(requestId, clientSentAtMs)
+    ServerSocketService.Connection.emit('musicGroupClockSyncRequest', payload)
+  }
+
+  const startClockSyncInterval = (): void => {
+    if (clockSyncIntervalRef.current !== null) {
+      window.clearInterval(clockSyncIntervalRef.current)
+    }
+
+    clockSyncIntervalRef.current = window.setInterval(() => {
+      requestClockSync()
+    }, CLOCK_SYNC_INTERVAL_MS)
+  }
+
+  const stopClockSyncInterval = (): void => {
+    if (clockSyncIntervalRef.current !== null) {
+      window.clearInterval(clockSyncIntervalRef.current)
+      clockSyncIntervalRef.current = null
+    }
+
+    pendingClockRequestsRef.current.clear()
+    bestClockSyncRttMsRef.current = null
+  }
+
+  const emitGroupedPlaybackCommand = (eventName: string): void => {
+    const payload: MusicGroupPlaybackCommand = { requestId: generateRequestId() }
+    ServerSocketService.Connection.emit(eventName, payload)
+  }
+
+  const handleGroupedColumnFinished = (): void => {
+    const schedule = activeGroupedScheduleRef.current
+    if (!schedule) {
+      return
+    }
+
+    progressRef.current = 1
+    stopTransportPlayback(false)
+
+    const payload: MusicGroupColumnFinishedPayload = {
+      groupId: schedule.groupId,
+      columnIndex: schedule.columnIndex,
+      scheduleToken: schedule.scheduleToken,
+    }
+    ServerSocketService.Connection.emit('musicGroupColumnFinished', payload)
+  }
+
+  const handleGroupedScheduledColumn = (payload: MusicGroupColumnScheduledPayload): void => {
+    const selfContext = selfGroupContextRef.current
+    if (payload.groupId !== selfContext.groupId) {
+      return
+    }
+
+    // Every group member mirrors the shared state, but only devices in the
+    // active column actually schedule their local Tone transport.
+    setPlayback(1)
+    if (groupCommandPendingRef.current === 'play') {
+      clearGroupCommandPending()
+    }
+
+    if (selfContext.columnIndex !== payload.columnIndex) {
+      activeGroupedScheduleRef.current = null
+      clearPendingGroupedStart()
+      return
+    }
+
+    clearPendingGroupedStart()
+    stopTransportPlayback(false)
+
+    const totalMs = getCompositionDurationMs(payload.sharedBpm)
+    const nextProgress = Math.max(0, Math.min(1, payload.resumePositionMs / totalMs))
+    const localStartTimeMs = payload.scheduledStartTimeMs + serverClockOffsetMsRef.current
+    const rawDelayMs = localStartTimeMs - Date.now()
+    const delayMs = Math.max(0, rawDelayMs)
+
+    console.log('shared playback start received', {
+      groupId: payload.groupId,
+      columnIndex: payload.columnIndex,
+      scheduleToken: payload.scheduleToken,
+      scheduledStartTimeMs: payload.scheduledStartTimeMs,
+      localStartTimeMs,
+      rawDelayMs,
+      delayMs,
+      serverClockOffsetMs: serverClockOffsetMsRef.current,
+    })
+
+    pendingGroupedStartTokenRef.current = payload.scheduleToken
+    activeGroupedScheduleRef.current = {
+      groupId: payload.groupId,
+      columnIndex: payload.columnIndex,
+      scheduleToken: payload.scheduleToken,
+      sharedBpm: payload.sharedBpm,
+    }
+    syncGroupPlaybackDebugSnapshot({
+      groupId: payload.groupId,
+      columnIndex: payload.columnIndex,
+      scheduleToken: payload.scheduleToken,
+    })
+
+    const startScheduledColumn = (): void => {
+      if (pendingGroupedStartTokenRef.current !== payload.scheduleToken) {
+        return
+      }
+
+      pendingGroupedStartTimerRef.current = null
+      pendingGroupedStartTokenRef.current = null
+      progressRef.current = nextProgress
+      void startTransportPlayback(payload.sharedBpm, nextProgress, handleGroupedColumnFinished).catch((error: unknown) => {
+        console.error('Failed to start shared playback', error)
+      })
+    }
+
+    if (delayMs === 0) {
+      startScheduledColumn()
+      return
+    }
+
+    pendingGroupedStartTimerRef.current = window.setTimeout(startScheduledColumn, delayMs)
+  }
+
+  const handleGroupedPauseCapture = (payload: MusicGroupPauseCapturePayload): void => {
+    const selfContext = selfGroupContextRef.current
+    const activeSchedule = activeGroupedScheduleRef.current
+
+    if (
+      payload.groupId !== selfContext.groupId ||
+      selfContext.columnIndex !== payload.columnIndex ||
+      !activeSchedule ||
+      activeSchedule.scheduleToken !== payload.scheduleToken
+    ) {
+      return
+    }
+
+    clearPendingGroupedStart()
+    stopTransportPlayback(false)
+    setPlayback(2)
+
+    const totalMs = getCompositionDurationMs(activeSchedule.sharedBpm)
+    const pausedPositionMs = Math.round(progressRef.current * totalMs)
+    const reportPayload: MusicGroupPauseReportPayload = {
+      groupId: payload.groupId,
+      requestId: payload.requestId,
+      scheduleToken: payload.scheduleToken,
+      positionMs: pausedPositionMs,
+    }
+    ServerSocketService.Connection.emit('musicGroupPauseReport', reportPayload)
+  }
+
+  const handleGroupedPaused = (payload: MusicGroupPausedPayload): void => {
+    const selfContext = selfGroupContextRef.current
+    if (payload.groupId !== selfContext.groupId) {
+      return
+    }
+
+    clearPendingGroupedStart()
+    stopTransportPlayback(false)
+    setPlayback(2)
+    if (groupCommandPendingRef.current === 'pause') {
+      clearGroupCommandPending()
+    }
+    syncGroupPlaybackDebugSnapshot({
+      groupId: payload.groupId,
+      columnIndex: payload.columnIndex,
+      scheduleToken: payload.scheduleToken,
+    })
+
+    // Only the currently active column applies the paused cursor resync.
+    // Inactive columns stay at 0 because they were not playing when pause occurred.
+    if (selfContext.columnIndex !== payload.columnIndex) {
+      progressRef.current = 0
+      return
+    }
+
+    const groupBpm = selfContext.sharedBpm ?? MUSIC_GROUP_SHARED_BPM
+    const totalMs = getCompositionDurationMs(groupBpm)
+    progressRef.current = Math.max(0, Math.min(1, payload.pausedPositionMs / totalMs))
+  }
+
+  const handleGroupedCancelScheduledStart = (payload: MusicGroupCancelScheduledStartPayload): void => {
+    const selfContext = selfGroupContextRef.current
+    if (payload.groupId !== selfContext.groupId || pendingGroupedStartTokenRef.current !== payload.scheduleToken) {
+      return
+    }
+
+    clearPendingGroupedStart()
+    syncGroupPlaybackDebugSnapshot({ scheduleToken: null })
+  }
+
+  const handleGroupedReset = (payload: MusicGroupResetPayload): void => {
+    const selfContext = selfGroupContextRef.current
+    if (payload.groupId !== selfContext.groupId) {
+      return
+    }
+
+    clearPendingGroupedStart()
+    stopTransportPlayback(true)
+    clearGroupCommandPending()
+    setPlayback(0)
+    syncGroupPlaybackDebugSnapshot({
+      groupId: payload.groupId,
+      columnIndex: null,
+      scheduleToken: null,
+    })
+  }
+
+  const handlePlayPause = async (): Promise<void> => {
+    if (groupCommandPending) {
+      return
+    }
+
+    await ensureAudioContextRunning()
+
+    if (isGrouped) {
+      if (playback === 1) {
+        markGroupCommandPending('pause')
+        emitGroupedPlaybackCommand('musicGroupPauseRequest')
+      } else {
+        markGroupCommandPending('play')
+        emitGroupedPlaybackCommand('musicGroupPlayRequest')
+      }
+      return
+    }
+
+    if (playback === 1) setPlayback(2)
+    else setPlayback(1)
+  }
+
+  const handleStop = (): void => {
+    if (groupCommandPending) {
+      return
+    }
+
+    if (isGrouped) {
+      markGroupCommandPending('stop')
+      emitGroupedPlaybackCommand('musicGroupStopRequest')
+      return
+    }
+
+    setPlayback(0)
+  }
 
   const requestDeviceMotionPermission = async () => {
         if (typeof (DeviceMotionEvent as any).requestPermission === 'function') {
@@ -78,7 +595,6 @@ function App() {
             const x = acceleration?.x || 0;
             const y = acceleration?.y || 0;
             const z = acceleration?.z || 0;
-            const timestamp: number = Date.now() as number;
 
             // Send individual acceleration data to server for shake detection
             // console.log(`📱 Sending deviceMotion:`, { x: x, y: y, z: z });
@@ -123,11 +639,16 @@ function App() {
     const onConnect = (): void => {
       console.log('Connected to SimSnap server');
       syncConnectionState()
+      bestClockSyncRttMsRef.current = null
+      requestClockSync()
+      startClockSyncInterval()
       requestDeviceMotionPermission();
     }
 
     const onDisconnect = (reason: string): void => {
       console.log(`Disconnected from SimSnap server: ${reason}`)
+      stopClockSyncInterval()
+      clearGroupCommandPending()
       syncConnectionState()
     }
 
@@ -142,13 +663,19 @@ function App() {
 
     const onReconnect = (): void => {
       syncConnectionState()
+      bestClockSyncRttMsRef.current = null
+      requestClockSync()
+      startClockSyncInterval()
     }
 
     const onReconnectError = (): void => {
+      stopClockSyncInterval()
       syncConnectionState()
     }
 
     const onReconnectFailed = (): void => {
+      stopClockSyncInterval()
+      clearGroupCommandPending()
       syncConnectionState()
     }
 
@@ -196,6 +723,59 @@ function App() {
       setMusicGroupState(payload)
     }
 
+    const onMusicGroupClockSyncResponse = (payload: MusicGroupClockSyncResponse): void => {
+      const startedAt = pendingClockRequestsRef.current.get(payload.requestId)
+      if (startedAt === undefined) {
+        return
+      }
+
+      pendingClockRequestsRef.current.delete(payload.requestId)
+      const receivedAtMs = Date.now()
+      const roundTripMs = receivedAtMs - startedAt
+      const estimatedServerTimeAtReceiveMs = payload.serverTimeMs + roundTripMs / 2
+      const currentBestRttMs = bestClockSyncRttMsRef.current
+
+      if (currentBestRttMs !== null && roundTripMs > currentBestRttMs) {
+        return
+      }
+
+      bestClockSyncRttMsRef.current = roundTripMs
+      // Store the local clock skew as client minus server so a positive value
+      // means the client clock is ahead of the server clock.
+      serverClockOffsetMsRef.current = Date.now() - estimatedServerTimeAtReceiveMs
+      console.log('clock sync sample', {
+        requestId: payload.requestId,
+        clientSentAtMs: payload.clientSentAtMs,
+        serverTimeMs: payload.serverTimeMs,
+        receivedAtMs,
+        roundTripMs,
+        bestClockSyncRttMs: bestClockSyncRttMsRef.current,
+        estimatedServerTimeAtReceiveMs,
+        clientClockOffsetMs: serverClockOffsetMsRef.current,
+      })
+      syncGroupPlaybackDebugSnapshot({ serverClockOffsetMs: serverClockOffsetMsRef.current })
+    }
+
+    const onMusicGroupColumnScheduled = (payload: MusicGroupColumnScheduledPayload): void => {
+      handleGroupedScheduledColumn(payload)
+    }
+
+    const onMusicGroupPauseCapture = (payload: MusicGroupPauseCapturePayload): void => {
+      handleGroupedPauseCapture(payload)
+    }
+
+    const onMusicGroupPaused = (payload: MusicGroupPausedPayload): void => {
+      handleGroupedPaused(payload)
+    }
+
+    const onMusicGroupCancelScheduledStart = (payload: MusicGroupCancelScheduledStartPayload): void => {
+      handleGroupedCancelScheduledStart(payload)
+    }
+
+    const onMusicGroupReset = (payload: MusicGroupResetPayload): void => {
+      handleGroupedReset(payload)
+    }
+
     const onConnectedToServer = (isConnected: boolean): void => {
       setConnectedToServer(isConnected && ServerSocketService.Connection.connected)
       if (!isConnected || !ServerSocketService.Connection.connected) {
@@ -218,6 +798,12 @@ function App() {
     ServerSocketService.Connection.on('unSnapBorder', onUnsnapBorder)
     ServerSocketService.Connection.on('shake', onShake)
     ServerSocketService.Connection.on('musicGroupState', onMusicGroupState)
+    ServerSocketService.Connection.on('musicGroupClockSyncResponse', onMusicGroupClockSyncResponse)
+    ServerSocketService.Connection.on('musicGroupColumnScheduled', onMusicGroupColumnScheduled)
+    ServerSocketService.Connection.on('musicGroupPauseCapture', onMusicGroupPauseCapture)
+    ServerSocketService.Connection.on('musicGroupPaused', onMusicGroupPaused)
+    ServerSocketService.Connection.on('musicGroupCancelScheduledStart', onMusicGroupCancelScheduledStart)
+    ServerSocketService.Connection.on('musicGroupReset', onMusicGroupReset)
     ServerSocketService.Connection.on('connectedToServer', onConnectedToServer)
 
     syncConnectionState()
@@ -249,6 +835,7 @@ function App() {
     window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
+      stopClockSyncInterval()
       ServerSocketService.Connection.off('snapBorder', onSnapBorder)
       ServerSocketService.Connection.off('unSnapBorder', onUnsnapBorder)
       ServerSocketService.Connection.off('connect', onConnect)
@@ -260,6 +847,12 @@ function App() {
       ServerSocketService.Connection.io.off('reconnect_failed', onReconnectFailed)
       ServerSocketService.Connection.off('clientSize', onClientSize)
       ServerSocketService.Connection.off('musicGroupState', onMusicGroupState)
+      ServerSocketService.Connection.off('musicGroupClockSyncResponse', onMusicGroupClockSyncResponse)
+      ServerSocketService.Connection.off('musicGroupColumnScheduled', onMusicGroupColumnScheduled)
+      ServerSocketService.Connection.off('musicGroupPauseCapture', onMusicGroupPauseCapture)
+      ServerSocketService.Connection.off('musicGroupPaused', onMusicGroupPaused)
+      ServerSocketService.Connection.off('musicGroupCancelScheduledStart', onMusicGroupCancelScheduledStart)
+      ServerSocketService.Connection.off('musicGroupReset', onMusicGroupReset)
       ServerSocketService.Connection.off('connectedToServer', onConnectedToServer)
       ServerSocketService.emit('destroy', undefined);
       containerRef.current!.onpointerdown = null;
@@ -268,119 +861,7 @@ function App() {
     }
   }, [])
 
-  const [loadedInstruments, setLoadedInstruments] = useState<Record<Instrument, boolean>>({
-    [Instrument.Piano]: false,
-    [Instrument.Guitar]: false,
-    [Instrument.Bells]: false,
-    [Instrument.Drums]: false
-  });
-  // References to stock instances of Tone.Sampler whitout triggering re-renders
-  const samplersRef = useRef<Record<Instrument, Tone.Sampler | null>>({
-    [Instrument.Piano]: null,
-    [Instrument.Guitar]: null,
-    [Instrument.Bells]: null,
-    [Instrument.Drums]: null,
-  });
-
-
-  // Inital instruments loading
   useEffect(() => {
-
-    // Piano samples
-    samplersRef.current.piano = new Tone.Sampler({
-      urls: {
-        A3: "Piano_A3.mp3",
-        B3: "Piano_B3.mp3",
-        C3: "Piano_C3.mp3",
-        D3: "Piano_D3.mp3",
-        E3: "Piano_E3.mp3",
-        F3: "Piano_F3.mp3",
-        G3: "Piano_G3.mp3"
-      },
-      baseUrl: "audio/piano/",
-      onload: () => setLoadedInstruments(prev => ({ ...prev, [Instrument.Piano]: true }))
-    }).toDestination();
-
-    // Guitar samples
-    samplersRef.current.guitar = new Tone.Sampler({
-      urls: {
-        A3: "guitar_A3.wav",
-        B3: "guitar_B3.wav",
-        C3: "guitar_C3.wav",
-        D3: "guitar_D3.wav",
-        E3: "guitar_E3.wav",
-        F3: "guitar_F3.wav",
-        G3: "guitar_G3.wav"
-      },
-      baseUrl: "audio/guitar/",
-      onload: () => setLoadedInstruments(prev => ({ ...prev, [Instrument.Guitar]: true }))
-    }).toDestination();
-
-    // Bells samples
-    samplersRef.current.bells = new Tone.Sampler({
-      urls: {
-        A3: "bells_A3.wav",
-        B3: "bells_B3.wav",
-        C3: "bells_C3.wav",
-        D3: "bells_D3.wav",
-        E3: "bells_E3.wav",
-        F3: "bells_F3.wav",
-        G3: "bells_G3.wav"
-      },
-      baseUrl: "audio/bells/",
-      onload: () => setLoadedInstruments(prev => ({ ...prev, [Instrument.Bells]: true }))
-    }).toDestination();
-
-    samplersRef.current[Instrument.Drums] = new Tone.Sampler({
-      urls: {
-        B3: "kick.wav",
-        A3: "snare.wav",
-        G3: "hihat.wav",
-        F3: "clap.wav"
-      },
-      baseUrl: "audio/drums/",
-      onload: () => setLoadedInstruments(prev => ({ ...prev, [Instrument.Drums]: true }))
-    }).toDestination();
-
-    // Clean up when unmount
-    return () => {
-      Object.values(samplersRef.current).forEach(sampler => sampler?.dispose());
-    };
-  }, []);
-
-  const constructComposition = async (totalDuration: number) => {
-    Tone.getTransport().cancel();
-    console.log("current instrument" + instrument);
-    const compositionSelected: Note[] = instrument === Instrument.Drums ? drumsComposition : composition
-    compositionSelected.forEach((note: Note) => {
-      const startTimeSec = note.startTime * totalDuration;
-
-      const durationSec = note.duration * totalDuration;
-      console.log(note.pitch+": start ="+startTimeSec+", duration ="+durationSec)
-
-      Tone.getTransport().schedule((time) => {
-        const currentSampler = samplersRef.current[instrument!];
-        if (currentSampler) {
-          if (instrument === Instrument.Drums) {
-            currentSampler.triggerAttackRelease(note.pitch + '3', durationSec, time);
-          } else {
-            currentSampler.triggerAttackRelease(note.pitch + octave.toString(), durationSec, time);
-          }
-
-        }
-
-      }, startTimeSec);
-    });
-  }
-
-
-  useEffect(() => {
-    // 1 bar(measure) = 4 beats 
-    // for a 4/4 signature (Common Time)
-    const totalDurationSec = (GRID_COLS / bpm) * 60; // The composition is 16 beats long (4 bar)
-    //Example: at a BPM of 60 it gives 4s because for 
-    const totalMs = totalDurationSec * 1000;
-
     //Handle volume (0 = current decibel level of the device)
     if (volume <= -40) {
       Tone.getDestination().mute = true;
@@ -391,57 +872,38 @@ function App() {
       Tone.getDestination().mute = true; //Safety silent mode
     }
 
+  }, [volume])
+
+  useEffect(() => {
+    if (isGrouped) {
+      return () => {
+        cancelAnimationLoop()
+      }
+    }
+
+    // 1 bar(measure) = 4 beats 
+    // for a 4/4 signature (Common Time)
+    // The composition is 16 beats long (4 bar) in 4/4 time.
+    const totalDurationSec = getCompositionDurationSec(playbackBpm)
+
     //Composition is playing
     if (playback === 1) {
-
-      constructComposition(totalDurationSec);
-
-      // Align the audio position with the visual position (when resuming after a pause)
-      Tone.getTransport().seconds = progressRef.current * totalDurationSec;
-      Tone.getTransport().start();
-
-      startTimeRef.current = performance.now() - progressRef.current * totalMs
-
-      const tick = (now: number): void => {
-        const startTime = startTimeRef.current
-        if (startTime === null) return
-
-        const elapsed = now - startTime
-        const progress = elapsed / totalMs
-
-        //Does the progress bar has reached the end of composition ? (1 = absolute size of compostion) 
-        if (progress >= 1) {
-          progressRef.current = 0
-          setPlayback('stop')
-          return
-        }
-
-        //If not we continue to progress on composition
-        progressRef.current = progress
-        animFrameRef.current = requestAnimationFrame(tick)
-      }
-
-      animFrameRef.current = requestAnimationFrame(tick)
+      startTransportPlayback(playbackBpm, progressRef.current, () => {
+        progressRef.current = 0
+        setPlayback('stop')
+      })
     } else {
-
-      Tone.getTransport().pause();
-
-      if (animFrameRef.current !== null) {
-        cancelAnimationFrame(animFrameRef.current)
-      }
+      stopTransportPlayback(playback === 0 || playback == 'stop')
 
       if (playback === 0 || playback == 'stop') {
-        Tone.getTransport().stop();
         progressRef.current = 0
       }
     }
 
     return () => {
-      if (animFrameRef.current !== null) {
-        cancelAnimationFrame(animFrameRef.current)
-      }
+      cancelAnimationLoop()
     }
-  }, [playback, bpm, setPlayback, volume])
+  }, [isGrouped, playback, playbackBpm, setPlayback])
 
   return (
     <div
@@ -463,7 +925,16 @@ function App() {
       <ctx.DrawStateContextProvider>
         <ctx.UndoContextProvider>
           <ctx.SFXContextProvider>
-            <TopBar volume={volume} setVolume={setVolume} />
+            <TopBar
+              volume={volume}
+              setVolume={setVolume}
+              displayedBpm={playbackBpm}
+              isGroupBpmLocked={isGrouped}
+              groupedControlsDisabled={isGrouped && !!groupCommandPending}
+              audioContextUnlocked={audioContextUnlocked}
+              onPlayPause={handlePlayPause}
+              onStop={handleStop}
+            />
             {instrument === Instrument.Drums ? <DrumSpace progressRef={progressRef} /> : <NoteSpace progressRef={progressRef} />}
             <ControlPanel />
           </ctx.SFXContextProvider>
@@ -484,65 +955,25 @@ function App() {
         />
       ))}
 
-      <div
-        style={{
-          position: 'absolute',
-          right: '8px',
-          top: '5px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          padding: '6px 8px',
-          backgroundColor: 'rgba(0, 0, 0, 0.7)',
-          color: '#ffffff',
-          fontSize: '11px',
-          lineHeight: 1.25,
-          fontFamily: 'monospace',
-          borderRadius: '4px',
-          zIndex: 10,
-          pointerEvents: 'none',
-        }}
-      >
-        <span
-          style={{
-            width: '8px',
-            height: '8px',
-            borderRadius: '999px',
-            backgroundColor: connectedToServer ? '#35d071' : '#e45050',
-            display: 'inline-block',
-          }}
-        />
-        server: {connectedToServer ? 'connected' : 'disconnected'}
-      </div>
+      <ServerStatusOverlay connected={connectedToServer} />
 
-      {(() => {
-        const selfDeviceId = musicGroupState?.selfDeviceId
-        const selfState = selfDeviceId ? musicGroupState?.devices[selfDeviceId] : undefined
-        const groupLabel = selfState?.groupId ?? 'none'
-        const positionLabel = selfState?.position ? `[col: ${selfState.position.col}, row: ${selfState.position.row}]` : 'n/a'
+      <GroupStatusOverlay
+        groupLabel={selfDeviceState?.groupId ?? 'none'}
+        positionLabel={
+          selfDeviceState?.position
+            ? `[col: ${selfDeviceState.position.col}, row: ${selfDeviceState.position.row}]`
+            : 'n/a'
+        }
+        bpmLabel={currentGroup?.sharedBpm ?? bpm}
+      />
 
-        return (
-          <div
-            style={{
-              position: 'absolute',
-              left: '8px',
-              top: '8px',
-              padding: '6px 8px',
-              backgroundColor: 'rgba(0, 0, 0, 0.7)',
-              color: '#ffffff',
-              fontSize: '11px',
-              lineHeight: 1.25,
-              fontFamily: 'monospace',
-              borderRadius: '4px',
-              zIndex: 10,
-              pointerEvents: 'none',
-            }}
-          >
-            group: {groupLabel}<br />
-            pos: {positionLabel}
-          </div>
-        )
-      })()}
+      <GroupDebugOverlay
+        enabled={SHOW_GROUP_PLAYBACK_DEBUG_OVERLAY}
+        groupId={groupPlaybackDebugSnapshot.groupId}
+        columnIndex={groupPlaybackDebugSnapshot.columnIndex}
+        scheduleToken={groupPlaybackDebugSnapshot.scheduleToken}
+        serverClockOffsetMs={groupPlaybackDebugSnapshot.serverClockOffsetMs}
+      />
     </div>
   )
 }

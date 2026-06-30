@@ -17,8 +17,79 @@ export interface MusicGroupStatePayload {
     groups: Array<{
         id: string;
         steps: string[][];
+        sharedBpm: number;
     }>;
     devices: Record<string, MusicGroupDeviceState>;
+}
+
+// Shared group playback uses a fixed BPM for now so every device in a column
+// computes the same transport duration even if their standalone BPM differs.
+export const MUSIC_GROUP_SHARED_BPM = 120;
+
+export type MusicGroupResetReason = 'stop' | 'naturalEnd' | 'topologyChange';
+
+export interface MusicGroupClockSyncRequest {
+    requestId: string;
+    clientSentAtMs: number;
+}
+
+export interface MusicGroupClockSyncResponse {
+    requestId: string;
+    clientSentAtMs: number;
+    serverTimeMs: number;
+}
+
+export interface MusicGroupPlaybackCommand {
+    requestId: string;
+}
+
+export interface MusicGroupColumnScheduledPayload {
+    groupId: string;
+    columnIndex: number;
+    resumePositionMs: number;
+    scheduledStartTimeMs: number;
+    scheduleToken: number;
+    sharedBpm: number;
+}
+
+export interface MusicGroupColumnFinishedPayload {
+    groupId: string;
+    columnIndex: number;
+    scheduleToken: number;
+}
+
+export interface MusicGroupPauseCapturePayload {
+    groupId: string;
+    columnIndex: number;
+    requestId: string;
+    scheduleToken: number;
+}
+
+export interface MusicGroupPauseReportPayload {
+    groupId: string;
+    requestId: string;
+    scheduleToken: number;
+    positionMs: number;
+}
+
+export interface MusicGroupPausedPayload {
+    groupId: string;
+    columnIndex: number;
+    pausedPositionMs: number;
+    scheduleToken: number;
+}
+
+export interface MusicGroupCancelScheduledStartPayload {
+    groupId: string;
+    columnIndex: number;
+    scheduleToken: number;
+    reason: Exclude<MusicGroupResetReason, 'naturalEnd'>;
+}
+
+export interface MusicGroupResetPayload {
+    groupId: string;
+    reason: MusicGroupResetReason;
+    sequence: number;
 }
 
 type DirectionalNeighbors = Partial<Record<Position, string>>;
@@ -83,12 +154,13 @@ export class MusicGroup  {
         (Object.keys(neighbors) as Position[]).forEach((position) => {
             const neighborId = neighbors[position];
             if (!neighborId) return;
+
             const reverseNeighbor = this.adjacency.get(neighborId);
             if (!reverseNeighbor) return;
+
             const opposite = MusicGroup.opposite(position);
-            if (reverseNeighbor[opposite] === deviceId) {
-                delete reverseNeighbor[opposite];
-            }
+            if (reverseNeighbor[opposite] !== deviceId) return;
+            delete reverseNeighbor[opposite];
         });
 
         this.adjacency.delete(deviceId);
@@ -129,25 +201,6 @@ export class MusicGroup  {
         this.adjacency.set(deviceA.id.value, neighborsA);
         this.adjacency.set(deviceB.id.value, neighborsB);
         return true;
-    }
-
-    unlinkDevices(deviceA: MusicDevice, deviceB: MusicDevice): void {
-        const neighborsA = this.adjacency.get(deviceA.id.value);
-        const neighborsB = this.adjacency.get(deviceB.id.value);
-        if (neighborsA) {
-            (Object.keys(neighborsA) as Position[]).forEach((position) => {
-                if (neighborsA[position] === deviceB.id.value) {
-                    delete neighborsA[position];
-                }
-            });
-        }
-        if (neighborsB) {
-            (Object.keys(neighborsB) as Position[]).forEach((position) => {
-                if (neighborsB[position] === deviceA.id.value) {
-                    delete neighborsB[position];
-                }
-            });
-        }
     }
 
     rebuildLayout(): boolean {
@@ -225,8 +278,8 @@ export class MusicGroup  {
 
         rawCoords.forEach((coord, deviceId) => {
             const normalizedCol = coord.col - minCol;
-            const device = this.members.get(deviceId);
-            if (!device) return;
+                const device = this.members.get(deviceId);
+                if (!device) return;
             const list = rowsByCol.get(normalizedCol) ?? [];
             list.push({ device, rawRow: coord.row });
             rowsByCol.set(normalizedCol, list);

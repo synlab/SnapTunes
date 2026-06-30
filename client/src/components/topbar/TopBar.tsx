@@ -1,12 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { IconButton, Tooltip, Slider } from '@mui/material'
-import * as Tone from 'tone';
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
 import PauseRoundedIcon from '@mui/icons-material/PauseRounded'
 import StopRoundedIcon from '@mui/icons-material/StopRounded'
-import SaveRoundedIcon from '@mui/icons-material/SaveRounded'
-import FileUploadRoundedIcon from '@mui/icons-material/FileUploadRounded'
-import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded'
 import VolumeDownRoundedIcon from '@mui/icons-material/VolumeDownRounded'
 import VolumeUpRoundedIcon from '@mui/icons-material/VolumeUpRounded'
 import VolumeOffRoundedIcon from '@mui/icons-material/VolumeOffRounded'
@@ -14,7 +10,6 @@ import FullscreenIcon from '@mui/icons-material/Fullscreen'
 import FullscreenExitIcon from '@mui/icons-material/Fullscreen'
 import * as ctx from '../../contexts/snaptunestatecontext'
 
-import { PiMetronome } from 'react-icons/pi'
 import { MdOutlinePiano } from 'react-icons/md'
 import { LuGuitar } from 'react-icons/lu'
 import { FaRegBell } from 'react-icons/fa'
@@ -24,6 +19,12 @@ import { Instrument, INSTRUMENT_THEMES } from '../../types'
 interface TopBarProps {
   volume: number,
   setVolume: React.Dispatch<React.SetStateAction<number>>
+  displayedBpm: number
+  isGroupBpmLocked: boolean
+  groupedControlsDisabled: boolean
+  audioContextUnlocked: boolean
+  onPlayPause: () => Promise<void>
+  onStop: () => void
 }
 
 interface InstrumentPreset {
@@ -44,6 +45,19 @@ const playButtonStyle = {
   padding: '8px',
 }
 
+const sliderSharedSx = {
+  width: '140px',
+  color: '#000',
+  '& .MuiSlider-thumb': { width: 12, height: 12, backgroundColor: '#4c66cf' },
+  '& .MuiSlider-track': { backgroundColor: '#4c66cf', border: 'none' },
+  '& .MuiSlider-rail': { backgroundColor: '#fff' },
+}
+
+const bpmSliderSx = {
+  ...sliderSharedSx,
+  '& .Mui-disabled': { color: '#d2d2d2' },
+}
+
 const INSTRUMENT_PRESETS: InstrumentPreset[] = [
   { label: Instrument.Piano, icon: <MdOutlinePiano /> },
   { label: Instrument.Guitar, icon: <LuGuitar /> },
@@ -51,11 +65,9 @@ const INSTRUMENT_PRESETS: InstrumentPreset[] = [
   { label: Instrument.Drums, icon: <LiaDrumSolid fontSize="28px" /> },
 ]
 
-export function TopBar({ volume, setVolume }: TopBarProps) {
+export function TopBar({ volume, setVolume, displayedBpm, isGroupBpmLocked, groupedControlsDisabled, audioContextUnlocked, onPlayPause, onStop }: TopBarProps) {
   const { playback } = ctx.usePlayback()
-  const { setPlayback } = ctx.useUpdatePlayback()
 
-  const { bpm } = ctx.useBPM()
   const { setBPM } = ctx.useUpdateBPM()
 
   const { instrument } = ctx.useInstrument()
@@ -104,12 +116,15 @@ export function TopBar({ volume, setVolume }: TopBarProps) {
       ? VolumeDownRoundedIcon
       : VolumeUpRoundedIcon
 
-  const PlaybackButton = playback === 2 ? PauseRoundedIcon : PlayArrowRoundedIcon
+  // Show the current playback state, not the last command:
+  // playing -> pause icon, paused/stopped -> play icon.
+  const PlaybackButton = playback === 1 ? PauseRoundedIcon : PlayArrowRoundedIcon
 
   const handleVolumeChange = (_event: Event, value: number | number[]): void => {
     setVolume(Array.isArray(value) ? value[0] : value)
   }
   const handleBPMChange = (_event: Event, value: number | number[]): void => {
+    if (isGroupBpmLocked) return
     setBPM(Array.isArray(value) ? value[0] : value)
   }
 
@@ -149,13 +164,7 @@ export function TopBar({ volume, setVolume }: TopBarProps) {
             min={-40}
             max={0}
             size="small"
-            sx={{
-              width: '140px',
-              color: '#000',
-              '& .MuiSlider-thumb': { width: 12, height: 12, backgroundColor: '#4c66cf' },
-              '& .MuiSlider-track': { backgroundColor: '#4c66cf', border: 'none' },
-              '& .MuiSlider-rail': { backgroundColor: '#fff' },
-            }}
+            sx={sliderSharedSx}
           />
         </div>
 
@@ -225,20 +234,17 @@ export function TopBar({ volume, setVolume }: TopBarProps) {
       </div>
 
       <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-        <Tooltip title="Play" placement="bottom">
+        <Tooltip title={groupedControlsDisabled ? 'Waiting for server sync...' : 'Play'} placement="bottom">
           <IconButton
             sx={playButtonStyle}
-            onClick={async () => {
-              await Tone.start();
-              if (playback === 1) setPlayback(2)
-              else setPlayback(1)
-            }}
+            disabled={groupedControlsDisabled}
+            onClick={onPlayPause}
           >
             <PlaybackButton />
           </IconButton>
         </Tooltip>
-        <Tooltip title="Stop" placement="bottom">
-          <IconButton sx={buttonStyle} onClick={() => setPlayback(0)}>
+        <Tooltip title={groupedControlsDisabled ? 'Waiting for server sync...' : 'Stop'} placement="bottom">
+          <IconButton sx={buttonStyle} disabled={groupedControlsDisabled} onClick={onStop}>
             <StopRoundedIcon fontSize="small" />
           </IconButton>
         </Tooltip>
@@ -259,27 +265,35 @@ export function TopBar({ volume, setVolume }: TopBarProps) {
             minWidth: '48px',
           }}
         >
-          <span style={{ fontSize: '18px', fontWeight: 600, color: '#fff', fontFamily: 'monospace' }}>{bpm}</span>
+          <span style={{ fontSize: '18px', fontWeight: 600, color: '#fff', fontFamily: 'monospace' }}>{displayedBpm}</span>
           <span style={{ fontSize: '12px', color: '#fff', fontFamily: 'monospace', letterSpacing: '0.05em' }}>
             BPM
           </span>
         </div>
 
         <Slider
-          value={bpm}
+          value={displayedBpm}
           onChange={handleBPMChange}
           min={30}
           max={200}
           step={5}
           size="small"
-          sx={{
-            width: '140px',
-            color: '#000',
-            '& .MuiSlider-thumb': { width: 12, height: 12, backgroundColor: '#4c66cf' },
-            '& .MuiSlider-track': { backgroundColor: '#4c66cf', border: 'none' },
-            '& .MuiSlider-rail': { backgroundColor: '#fff' },
-          }}
+          disabled={isGroupBpmLocked}
+          sx={bpmSliderSx}
         />
+        {isGroupBpmLocked && (
+          <div
+            style={{
+              color: audioContextUnlocked ? '#ffffff' : '#ffe38a',
+              fontSize: '10px',
+              fontFamily: 'monospace',
+              minWidth: '90px',
+              textAlign: 'left',
+            }}
+          >
+            audio: {audioContextUnlocked ? 'ready' : 'tap screen'}
+          </div>
+        )}
       </div>
       <Tooltip title="Fullscreen" placement="bottom">
         <IconButton sx={buttonStyle} onClick={toggleFullscreen}>
