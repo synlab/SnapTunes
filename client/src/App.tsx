@@ -31,6 +31,7 @@ import * as Tone from 'tone';
 import { MovementManagerDeviceEvent } from 'simsnap-core/src/entities/VirtualRoom/MovementManager'
 
 
+//For visualizing snap borders between devices
 interface SnapBorder {
   id: string
   x: string
@@ -41,12 +42,14 @@ interface SnapBorder {
   position: string
 }
 
+// For tracking the local device's group context for shared playback
 interface SelfGroupContext {
   groupId: string | null
   columnIndex: number | null
   sharedBpm: number | null
 }
 
+// For tracking the currently active shared playback schedule, if any
 interface ActiveGroupedSchedule {
   groupId: string
   columnIndex: number
@@ -54,11 +57,7 @@ interface ActiveGroupedSchedule {
   sharedBpm: number
 }
 
-// Temporary grouped-playback diagnostics. Remove this flag and the matching
-// overlay block when multi-device testing is finished.
-const SHOW_GROUP_PLAYBACK_DEBUG_OVERLAY = true
-const CLOCK_SYNC_INTERVAL_MS = 5000
-
+// For tracking the local device's group context for shared playback
 interface GroupPlaybackDebugSnapshot {
   groupId: string | null
   columnIndex: number | null
@@ -66,9 +65,21 @@ interface GroupPlaybackDebugSnapshot {
   serverClockOffsetMs: number
 }
 
+// Debug overlay toggle flags, set to true to enable the corresponding overlay for development and testing purposes.
+const SHOW_DEBUG_OVERLAY = {
+  server: true, // Gives information about the server connection status (connected/disconnected)
+  group: true, // Gives information about the current group, position, and shared bpm
+  playback: true // Shows playback-related debug information
+} 
+
+// Send a clock sync request every 5 seconds to keep the local clock offset estimate up to date
+const CLOCK_SYNC_INTERVAL_MS = 5000 
+
+
 type GroupControlCommand = 'play' | 'pause' | 'stop'
 
 function App() {
+  // Context hooks for accessing and updating the global state
   const { instrument } = ctx.useInstrument()
   const { playback } = ctx.usePlayback()
   const { setPlayback } = ctx.useUpdatePlayback()
@@ -78,6 +89,7 @@ function App() {
   const { octave } = ctx.useOctave()
   const { requestClear } = ctx.useUpdateClear();
 
+  // Refs for tracking individual state variables of a 
   const progressRef = useRef<number>(0)
   const animFrameRef = useRef<number | null>(null)
   const startTimeRef = useRef<number | null>(null)
@@ -86,6 +98,8 @@ function App() {
   const compositionRef = useRef<Note[]>(composition)
   const drumsCompositionRef = useRef<Note[]>(drumsComposition)
   const octaveRef = useRef<number>(octave)
+
+  // Refs for tracking the local device's group context and shared playback state
   const selfGroupContextRef = useRef<SelfGroupContext>({ groupId: null, columnIndex: null, sharedBpm: null })
   const serverClockOffsetMsRef = useRef<number>(0)
   const pendingClockRequestsRef = useRef<Map<string, number>>(new Map<string, number>())
@@ -127,6 +141,8 @@ function App() {
   const isGrouped = !!selfDeviceState?.groupId && !!selfDeviceState.position && !!currentGroup
   const playbackBpm = currentGroup?.sharedBpm ?? bpm
 
+
+  // Update refs whenever the corresponding context state variables change
   useEffect(() => {
     instrumentRef.current = instrument
   }, [instrument])
@@ -143,6 +159,7 @@ function App() {
     octaveRef.current = octave
   }, [octave])
 
+  // Update the group command pending ref whenever the state changes
   useEffect(() => {
     groupCommandPendingRef.current = groupCommandPending
   }, [groupCommandPending])
@@ -251,7 +268,7 @@ function App() {
   }
 
   const syncGroupPlaybackDebugSnapshot = (overrides: Partial<GroupPlaybackDebugSnapshot> = {}): void => {
-    if (!SHOW_GROUP_PLAYBACK_DEBUG_OVERLAY) {
+    if (!SHOW_DEBUG_OVERLAY.group) {
       return
     }
 
@@ -955,9 +972,10 @@ function App() {
         />
       ))}
 
-      <ServerStatusOverlay connected={connectedToServer} />
+      <ServerStatusOverlay enabled={SHOW_DEBUG_OVERLAY.server} connected={connectedToServer} />
 
       <GroupStatusOverlay
+        enabled={SHOW_DEBUG_OVERLAY.group}
         groupLabel={selfDeviceState?.groupId ?? 'none'}
         positionLabel={
           selfDeviceState?.position
@@ -968,7 +986,7 @@ function App() {
       />
 
       <GroupDebugOverlay
-        enabled={SHOW_GROUP_PLAYBACK_DEBUG_OVERLAY}
+        enabled={SHOW_DEBUG_OVERLAY.playback}
         groupId={groupPlaybackDebugSnapshot.groupId}
         columnIndex={groupPlaybackDebugSnapshot.columnIndex}
         scheduleToken={groupPlaybackDebugSnapshot.scheduleToken}

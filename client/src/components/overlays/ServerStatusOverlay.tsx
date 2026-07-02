@@ -6,9 +6,14 @@ import {
 
 interface ServerStatusOverlayProps {
   connected: boolean
+  enabled: boolean
 }
 
-export function ServerStatusOverlay({ connected }: ServerStatusOverlayProps) {
+export function ServerStatusOverlay({ enabled, connected }: ServerStatusOverlayProps) {
+  if (!enabled) {
+    return null
+  }
+
   return (
     <div
       style={{

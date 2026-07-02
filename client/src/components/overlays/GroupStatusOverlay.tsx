@@ -8,9 +8,14 @@ interface GroupStatusOverlayProps {
   groupLabel: string
   positionLabel: string
   bpmLabel: number
+  enabled: boolean
 }
 
-export function GroupStatusOverlay({ groupLabel, positionLabel, bpmLabel }: GroupStatusOverlayProps) {
+export function GroupStatusOverlay({ enabled, groupLabel, positionLabel, bpmLabel }: GroupStatusOverlayProps) {
+  if (!enabled) {
+    return null
+  }
+
   return (
     <div
       style={{
