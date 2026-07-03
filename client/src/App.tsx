@@ -611,8 +611,11 @@ function App() {
             const acceleration = event.acceleration;
             const x = acceleration?.x || 0;
             const y = acceleration?.y || 0;
-            const z = acceleration?.z || 0;
-
+            // Don't use z-axis because it can be affected by gravity and may not accurately represent shake events
+            // When a tablet is turned upside down, the z-axis will send very high values for some reason (gravity?).
+            // The octave change is very close to triggering this behavior, so we will ignore z-axis for now. We can revisit this later if needed.
+            const z = 1;
+            
             // Send individual acceleration data to server for shake detection
             // console.log(`📱 Sending deviceMotion:`, { x: x, y: y, z: z });
             ServerSocketService.emit('acceleration', { x,  y, z });

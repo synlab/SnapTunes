@@ -53,9 +53,9 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
     constructor(ioServer: Server, override virtualRoom: VirtualRoom = new VirtualRoom()) {
         super('', ioServer, virtualRoom, (clientSocket) => new MusicClientSocketService(clientSocket, virtualRoom));
         this.virtualRoom.movementManager?.configure(
-            1000,
-            400,
-            12
+            800, // Timeout for movement events in milliseconds
+            250, // Cooldown period for movement events in milliseconds
+            4, // Strength threshold for movement events
         );
 
         this.virtualRoom.addEventListener('snapDevices', this.handleSnapDevices.bind(this));
