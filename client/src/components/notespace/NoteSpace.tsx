@@ -136,7 +136,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
     if (!containerRef.current) return;
 
     const sketch = (p: P5Instance) => {
-      const LONG_PRESS_MS = 400
+      const LONG_PRESS_MS = 100
       const LONG_PRESS_MOVE_TOLERANCE_PX = 10
       const isMelodicClearTarget = (target: ctx.ClearTarget): boolean =>
         target === 'all' || target === 'melodic'

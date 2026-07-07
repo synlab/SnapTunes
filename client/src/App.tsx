@@ -67,9 +67,9 @@ interface GroupPlaybackDebugSnapshot {
 
 // Debug overlay toggle flags, set to true to enable the corresponding overlay for development and testing purposes.
 const SHOW_DEBUG_OVERLAY = {
-  server: true, // Gives information about the server connection status (connected/disconnected)
-  group: true, // Gives information about the current group, position, and shared bpm
-  playback: true // Shows playback-related debug information
+  server: false, // Gives information about the server connection status (connected/disconnected)
+  group: false, // Gives information about the current group, position, and shared bpm
+  playback: false // Shows playback-related debug information
 } 
 
 // Send a clock sync request every 5 seconds to keep the local clock offset estimate up to date
