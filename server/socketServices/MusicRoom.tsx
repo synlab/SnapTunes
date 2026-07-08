@@ -134,6 +134,45 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         this.emit('destroy', undefined);
     }
 
+    handleSnapDevices({ event1, event2 }: SnapDevicesEvent): void {
+        const device1 = event1.device as MusicDevice;
+        const device2 = event2.device as MusicDevice;
+
+        // Joining two devices can merge or reshape groups, so shared playback is
+        // interrupted before the topology mutation is applied.
+        this.stopPlaybackForAffectedGroups(device1.musicGroup, device2.musicGroup);
+
+        
+        if (!this.isValidOppositePair(event1.position, event2.position)) {
+            // Reject invalid directional pairs and roll the edge back immediately.
+            this.removePairSnapRelation(device1, device2);
+            this.rebuildGroupsFromCurrentSnaps();
+            this.emitMusicGroupState();
+            return;
+        }
+
+        // Upsert pair relation: if these two devices were already snapped on a
+        // different edge pair, replace the old edge with the newly reported one.
+        this.replacePairSnapRelation(device1, event1, device2, event2);
+
+        const rebuildSuccess = this.rebuildGroupsFromCurrentSnaps();
+        if (!rebuildSuccess) {
+            // Conflict policy: reject latest edge and keep previously valid topology.
+            this.removePairSnapRelation(device1, device2);
+            console.log('MusicRoom: snapDevices rejected due to layout conflict, rolling back edge');
+            this.rebuildGroupsFromCurrentSnaps();
+            this.emitMusicGroupState();
+            return;
+        }
+
+        //Send visual indications to clients that the snap was successful
+        device1.client.snapBorder(event1);
+        device2.client.snapBorder(event2);
+
+
+        this.emitMusicGroupState();
+    }
+    
     handleUnSnapDevices({ event1, event2 }: SnapDevicesEvent): void {
         const device1 = event1.device as MusicDevice;
         const device2 = event2.device as MusicDevice;
@@ -152,40 +191,6 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
             // Keep state safe if graph data is inconsistent after mutation.
             this.clearAllDeviceGroupState();
         }
-        this.emitMusicGroupState();
-    }
-
-    handleSnapDevices({ event1, event2 }: SnapDevicesEvent): void {
-        const device1 = event1.device as MusicDevice;
-        const device2 = event2.device as MusicDevice;
-
-        // Joining two devices can merge or reshape groups, so shared playback is
-        // interrupted before the topology mutation is applied.
-        this.stopPlaybackForAffectedGroups(device1.musicGroup, device2.musicGroup);
-
-        device1.client.snapBorder(event1);
-        device2.client.snapBorder(event2);
-
-        if (!this.isValidOppositePair(event1.position, event2.position)) {
-            // Reject invalid directional pairs and roll the edge back immediately.
-            this.rejectSnapPair(device1, event1, device2, event2);
-            this.rebuildGroupsFromCurrentSnaps();
-            this.emitMusicGroupState();
-            return;
-        }
-
-        // Upsert pair relation: if these two devices were already snapped on a
-        // different edge pair, replace the old edge with the newly reported one.
-        this.replacePairSnapRelation(device1, event1, device2, event2);
-
-        const rebuildSuccess = this.rebuildGroupsFromCurrentSnaps();
-        if (!rebuildSuccess) {
-            // Conflict policy: reject latest edge and keep previously valid topology.
-            this.rejectSnapPair(device1, event1, device2, event2);
-            console.log('MusicRoom: snapDevices rejected due to layout conflict, rolling back edge');
-            this.rebuildGroupsFromCurrentSnaps();
-        }
-
         this.emitMusicGroupState();
     }
 
@@ -221,12 +226,6 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
 
         device1.snapDevices = device1.snapDevices.filter((event) => event.snapDevice.id.value !== device2Id);
         device2.snapDevices = device2.snapDevices.filter((event) => event.snapDevice.id.value !== device1Id);
-    }
-
-    private rejectSnapPair(device1: MusicDevice, event1: SnapEvent, device2: MusicDevice, event2: SnapEvent): void {
-        this.removePairSnapRelation(device1, device2);
-        device1.client.unSnapBorder(event1);
-        device2.client.unSnapBorder(event2);
     }
 
     private replacePairSnapRelation(

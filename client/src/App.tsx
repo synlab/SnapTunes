@@ -67,7 +67,7 @@ interface GroupPlaybackDebugSnapshot {
 
 // Debug overlay toggle flags, set to true to enable the corresponding overlay for development and testing purposes.
 const SHOW_DEBUG_OVERLAY = {
-  server: false, // Gives information about the server connection status (connected/disconnected)
+  server: true, // Gives information about the server connection status (connected/disconnected)
   group: false, // Gives information about the current group, position, and shared bpm
   playback: false // Shows playback-related debug information
 } 
@@ -956,7 +956,7 @@ function App() {
               onStop={handleStop}
             />
             {instrument === Instrument.Drums ? <DrumSpace progressRef={progressRef} /> : <NoteSpace progressRef={progressRef} />}
-            <ControlPanel />
+            {/**<ControlPanel />**/}
           </ctx.SFXContextProvider>
         </ctx.UndoContextProvider>
       </ctx.DrawStateContextProvider>
