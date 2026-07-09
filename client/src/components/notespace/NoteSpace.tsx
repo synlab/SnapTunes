@@ -87,6 +87,8 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
   const { composition } = ctx.useComposition()
   const { setComposition } = ctx.useUpdateComposition()
   const { octave } = ctx.useOctave()
+  //TODO: delete
+  const { setOctave } = ctx.useUpdateOctave()
   const { instrument } = ctx.useInstrument()
   const activeInstrument = instrument ?? Instrument.Piano
   const activeTheme = INSTRUMENT_THEMES[activeInstrument]
@@ -590,6 +592,15 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
 
         if (isInsideRelativeElementPosition(p.mouseX, p.mouseY, p.width, p.height)) {
           currentStroke.push([p.mouseX, p.mouseY])
+        }
+      }
+
+      //Remove note on double click
+      p.doubleClicked = () => {
+        const clickedNote = getNoteAtPosition(p.mouseX, p.mouseY)
+        if (clickedNote) {
+          compositionTemp = compositionTemp.filter((note) => note !== clickedNote)
+          setComposition(compositionTemp)
         }
       }
 
