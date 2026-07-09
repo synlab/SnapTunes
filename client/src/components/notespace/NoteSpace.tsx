@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import * as ctx from '../../contexts/snaptunestatecontext'
+import * as simsnapctx from '../../contexts/simsnapcontext'
 import p5 from 'p5'
 import { Instrument, INSTRUMENT_THEMES, Note, CHROMATIC_NOTES, GRID_COLS, GRID_ROWS, type InstrumentTheme } from '../../types'
 import { applyNotesToComposition, gridSpanToNote, isInsideRelativeElementPosition, notesOverlap, pointToGridCell } from '../../utils/noteProcessor'
+
+interface NoteSpaceProps {
+  progressRef: RefObject<number>
+}
 
 type P5Instance = InstanceType<typeof p5>
 type StrokePoint = readonly [number, number]
@@ -33,10 +38,6 @@ interface DragOverlayState {
   width: number
   height: number
   isEntering: boolean
-}
-
-interface NoteSpaceProps {
-  progressRef: RefObject<number>
 }
 
 interface NoteLabelCellProps {
@@ -90,6 +91,12 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
   const { octave } = ctx.useOctave()
   const { instrument } = ctx.useInstrument()
 
+  // Context for tracking the last time a snap or unsnap event occurred, used to determine if an undo should be triggered after such events.
+  const { lastTimeSnapOrUnsnapContext } = simsnapctx.useLastTimeSnapOrUnsnapContext()
+
+  // Local state for tracking the last time the composition was updated, used to determine if an undo should be triggered after a snap/unsnap event.
+  const [lastCompositionUpdateTime, setLastCompositionUpdateTime] = useState<number>(0)
+
   const activeInstrument = instrument ?? Instrument.Piano
   const activeTheme = INSTRUMENT_THEMES[activeInstrument]
   const [dragOverlay, setDragOverlay] = useState<DragOverlayState>({
@@ -131,6 +138,14 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
   useEffect(() => {
     instrumentThemeRef.current = activeTheme
   }, [activeTheme])
+
+  useEffect(() => {
+    const difference = Math.abs(lastCompositionUpdateTime - lastTimeSnapOrUnsnapContext)
+    if (difference < 50) { // If the last composition update was within 50ms of the last snap/unsnap event, trigger undo
+      setUndo(true)
+    }
+  }, [lastTimeSnapOrUnsnapContext])
+
 
   /**
    * Initializes and manages p5 sketch
@@ -604,9 +619,12 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
       p.doubleClicked = () => {
         const clickedNote = getNoteAtPosition(p.mouseX, p.mouseY)
         if (clickedNote) {
-           historyRef.current.push([...compositionTemp]) // Save previous state for undo
+          historyRef.current.push([...compositionTemp]) // Save previous state for undo
           compositionTemp = compositionTemp.filter((note) => note !== clickedNote)
           setComposition(compositionTemp)
+          // Update the last composition update time to help determine if it was performed while atempting to snap/unsnap the device.
+          // (The only use of this following line would be if the user double-clicks to remove a note while snapping/unsnapping, which is a rare case, but we want to be consistent.)
+          setLastCompositionUpdateTime(Date.now())
         }
       }
 
@@ -618,8 +636,8 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
           if (activeDraggedNote) {
             const releasedInside = isInsideRelativeElementPosition(p.mouseX, p.mouseY, p.width, p.height)
             const compositionWithoutSource = compositionTemp.filter((note) => note !== activeDraggedNote?.sourceNote)
-            
-              if (releasedInside) {
+
+            if (releasedInside) {
               compositionTemp = applyNotesToComposition(compositionWithoutSource, [activeDraggedNote.draftNote])
             } else {
               // Releasing outside canvas permanently removes the dragged note.
@@ -628,10 +646,10 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
 
 
             setComposition(compositionTemp)
-            
+            setLastCompositionUpdateTime(Date.now()) // Update the last composition update time to help determine if it was performed while atempting to snap/unsnap the device.
             const samePositionAsSource = activeDraggedNote.sourceNote.startTime === activeDraggedNote.draftNote.startTime &&
               activeDraggedNote.sourceNote.pitch === activeDraggedNote.draftNote.pitch
-            if(!samePositionAsSource) { // Save state for undo only if the note was actually moved
+            if (!samePositionAsSource) { // Save state for undo only if the note was actually moved
               historyRef.current.push([...compositionTemp]) //Add new composition state to history for undo functionality
             }
             drawGesture = null
@@ -656,6 +674,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
             compositionTemp = applyNotesToComposition(compositionTemp, [note])
             setComposition(compositionTemp)
             historyRef.current.push([...compositionTemp]) // Save state for undo
+            setLastCompositionUpdateTime(Date.now()) // Update the last composition update time to help determine if it was performed while atempting to snap/unsnap the device.
           }
 
           drawGesture = null

@@ -7,6 +7,7 @@ import { ServerStatusOverlay } from './components/overlays/ServerStatusOverlay'
 import { GroupStatusOverlay } from './components/overlays/GroupStatusOverlay'
 import { GroupDebugOverlay } from './components/overlays/GroupDebugOverlay'
 import * as ctx from './contexts/snaptunestatecontext'
+import * as simsnapctx from './contexts/simsnapcontext'
 import { ServerSocketService } from 'simsnap-core'
 import './App.css'
 import {
@@ -70,10 +71,10 @@ const SHOW_DEBUG_OVERLAY = {
   server: true, // Gives information about the server connection status (connected/disconnected)
   group: false, // Gives information about the current group, position, and shared bpm
   playback: false // Shows playback-related debug information
-} 
+}
 
 // Send a clock sync request every 5 seconds to keep the local clock offset estimate up to date
-const CLOCK_SYNC_INTERVAL_MS = 5000 
+const CLOCK_SYNC_INTERVAL_MS = 5000
 
 
 type GroupControlCommand = 'play' | 'pause' | 'stop'
@@ -88,6 +89,9 @@ function App() {
   const { drumsComposition } = ctx.useDrumsComposition()
   const { octave } = ctx.useOctave()
   const { requestClear } = ctx.useUpdateClear();
+
+  // Context for tracking the last time a snap or unsnap event occurred, used to determine if an undo should be triggered after such events.
+  const { setlastTimeSnapOrUnsnapContext } = simsnapctx.useUpdateLastTimeSnapOrUnsnapContext()
 
   // Refs for tracking individual state variables of a device without triggering re-renders. These are used for playback and group synchronization logic.
   const progressRef = useRef<number>(0)
@@ -108,7 +112,7 @@ function App() {
   const pendingGroupedStartTimerRef = useRef<number | null>(null)
   const pendingGroupedStartTokenRef = useRef<number | null>(null)
   const activeGroupedScheduleRef = useRef<ActiveGroupedSchedule | null>(null)
-  
+
 
   const [snapBorders, setSnapBorders] = useState<SnapBorder[]>([])
   const [musicGroupState, setMusicGroupState] = useState<MusicGroupStatePayload | null>(null)
@@ -584,52 +588,52 @@ function App() {
   }
 
   const requestDeviceMotionPermission = async () => {
-        if (typeof (DeviceMotionEvent as any).requestPermission === 'function') {
-            // iOS 13+ devices
-            try {
-                const permissionState = await (DeviceMotionEvent as any).requestPermission();
-                setPermissionGranted(permissionState === 'granted');
-                console.log(`Device motion permission: ${permissionState}`);
-                return permissionState === 'granted';
-            } catch (error) {
-                console.error('Error requesting device motion permission:', error);
-                return false;
-            }
-        } else {
-            // Non-iOS devices (automatically granted)
-            setPermissionGranted(true);
-            console.log('Device motion permission: automatically granted');
-            return true;
-        }
+    if (typeof (DeviceMotionEvent as any).requestPermission === 'function') {
+      // iOS 13+ devices
+      try {
+        const permissionState = await (DeviceMotionEvent as any).requestPermission();
+        setPermissionGranted(permissionState === 'granted');
+        console.log(`Device motion permission: ${permissionState}`);
+        return permissionState === 'granted';
+      } catch (error) {
+        console.error('Error requesting device motion permission:', error);
+        return false;
+      }
+    } else {
+      // Non-iOS devices (automatically granted)
+      setPermissionGranted(true);
+      console.log('Device motion permission: automatically granted');
+      return true;
+    }
+  };
+
+  // Device motion effect
+  useEffect(() => {
+    const handleDeviceAcceleration = (event: DeviceMotionEvent) => {
+      if (!permissionGranted) return;
+
+      const acceleration = event.acceleration;
+      const x = acceleration?.x || 0;
+      const y = acceleration?.y || 0;
+      // Don't use z-axis because it can be affected by gravity and may not accurately represent shake events
+      // When a tablet is turned upside down, the z-axis will send very high values for some reason (gravity?).
+      // The octave change is very close to triggering this behavior, so we will ignore z-axis for now. We can revisit this later if needed.
+      const z = 1;
+
+      // Send individual acceleration data to server for shake detection
+      // console.log(`📱 Sending deviceMotion:`, { x: x, y: y, z: z });
+      ServerSocketService.emit('acceleration', { x, y, z });
     };
 
-    // Device motion effect
-    useEffect(() => {
-        const handleDeviceAcceleration = (event: DeviceMotionEvent) => {
-            if (!permissionGranted) return;
+    if (permissionGranted) {
+      window.addEventListener('devicemotion', handleDeviceAcceleration);
+      console.log('Device motion listener added');
+    }
 
-            const acceleration = event.acceleration;
-            const x = acceleration?.x || 0;
-            const y = acceleration?.y || 0;
-            // Don't use z-axis because it can be affected by gravity and may not accurately represent shake events
-            // When a tablet is turned upside down, the z-axis will send very high values for some reason (gravity?).
-            // The octave change is very close to triggering this behavior, so we will ignore z-axis for now. We can revisit this later if needed.
-            const z = 1;
-            
-            // Send individual acceleration data to server for shake detection
-            // console.log(`📱 Sending deviceMotion:`, { x: x, y: y, z: z });
-            ServerSocketService.emit('acceleration', { x,  y, z });
-          };
-
-        if (permissionGranted) {
-            window.addEventListener('devicemotion', handleDeviceAcceleration);
-            console.log('Device motion listener added');
-        }
-
-        return () => {
-            window.removeEventListener('devicemotion', handleDeviceAcceleration);
-        };
-    }, [permissionGranted]);
+    return () => {
+      window.removeEventListener('devicemotion', handleDeviceAcceleration);
+    };
+  }, [permissionGranted]);
 
 
   useEffect(() => {
@@ -708,6 +712,8 @@ function App() {
         `🔗 Snap border received: device=${snapedDeviceId}, position=${position}, color=${color}`
       )
 
+      setlastTimeSnapOrUnsnapContext(Date.now()) // Update the last time a snap or unsnap event occurred
+
       const isVerticalBorder = ['left', 'right'].includes(position)
       const strokeWidth = '5px'
       const isCurrentlyFullscreen = !!document.fullscreenElement
@@ -728,6 +734,9 @@ function App() {
 
     const onUnsnapBorder = (snapedDeviceId: string): void => {
       console.log(`💔 Unsnap border received: device=${snapedDeviceId}`)
+
+      setlastTimeSnapOrUnsnapContext(Date.now()) // Update the last time a snap or unsnap event occurred
+
       setSnapBorders((prev) => prev.filter((border) => border.id !== snapedDeviceId))
     }
 
@@ -942,6 +951,7 @@ function App() {
         touchAction: 'none',
       }}
     >
+
       <ctx.DrawStateContextProvider>
         <ctx.UndoContextProvider>
           <ctx.SFXContextProvider>

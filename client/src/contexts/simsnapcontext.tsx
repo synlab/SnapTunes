@@ -2,32 +2,24 @@ import { createContext, useContext, useState, type ReactNode, type Dispatch, typ
 
 /*
 Included Contexts
-- Play/Pause/Stop State
-- Draw State (Draw/Erase)
-- Current Octave
-- Current Instrument
-- Active SFX & Values
-- Toggle Clear
-- Toggle Undo
+- LastTimeSnapOrUnsnapContext: Tracks the last time a snap or unsnap event occurred, allowing components to respond to these events.
 
-I(snowie) prefer splitting up each variable into its own context, 
-as not every component needs access to every state variable.
 */
 
-interface SnapContextValue {
-  snapContext: number
+interface LastTimeSnapOrUnsnapContextValue {
+  lastTimeSnapOrUnsnapContext: number
 }
 
-interface UpdateSnapContextValue {
-  setSnapContext: Dispatch<SetStateAction<number>>
+interface UpdateLastTimeSnapOrUnsnapContextValue {
+  setlastTimeSnapOrUnsnapContext: Dispatch<SetStateAction<number>>
 }
 
 interface ProviderProps {
   children: ReactNode
 }
 
-const SnapContext = createContext<SnapContextValue | undefined>(undefined)
-const UpdateSnapContext = createContext<UpdateSnapContextValue | undefined>(undefined)
+const LastTimeSnapOrUnsnapSnapContext = createContext<LastTimeSnapOrUnsnapContextValue | undefined>(undefined)
+const LastTimeSnapOrUnsnapUpdateSnapContext = createContext<UpdateLastTimeSnapOrUnsnapContextValue | undefined>(undefined)
 
 const useRequiredContext = <T,>(context: T | undefined, errorMessage: string): T => {
   if (context === undefined) {
@@ -37,20 +29,20 @@ const useRequiredContext = <T,>(context: T | undefined, errorMessage: string): T
   return context
 }
 
-export const SnapContextProvider = ({ children }: ProviderProps) => {
-  const [snapContext, setSnapContext] = useState<number>(0)
+export const LastTimeSnapOrUnsnapContextProvider = ({ children }: ProviderProps) => {
+  const [lastTimeSnapOrUnsnapContext, setlastTimeSnapOrUnsnapContext] = useState<number>(0)
 
   return (
-    <SnapContext.Provider value={{ snapContext }}>
-      <UpdateSnapContext.Provider value={{ setSnapContext }}>
+    <LastTimeSnapOrUnsnapSnapContext.Provider value={{ lastTimeSnapOrUnsnapContext: lastTimeSnapOrUnsnapContext }}>
+      <LastTimeSnapOrUnsnapUpdateSnapContext.Provider value={{ setlastTimeSnapOrUnsnapContext: setlastTimeSnapOrUnsnapContext }}>
         {children}
-      </UpdateSnapContext.Provider>
-    </SnapContext.Provider>
+      </LastTimeSnapOrUnsnapUpdateSnapContext.Provider>
+    </LastTimeSnapOrUnsnapSnapContext.Provider>
   )
 }
 
-export const useSnapContext = (): SnapContextValue =>
-  useRequiredContext(useContext(SnapContext), 'SnapContext Error')
+export const useLastTimeSnapOrUnsnapContext = (): LastTimeSnapOrUnsnapContextValue =>
+  useRequiredContext(useContext(LastTimeSnapOrUnsnapSnapContext), 'LastTimeSnapOrUnsnapContext Error')
 
-export const useUpdateSnapContext = (): UpdateSnapContextValue =>
-  useRequiredContext(useContext(UpdateSnapContext), 'Update SnapContext Error')
+export const useUpdateLastTimeSnapOrUnsnapContext = (): UpdateLastTimeSnapOrUnsnapContextValue =>
+  useRequiredContext(useContext(LastTimeSnapOrUnsnapUpdateSnapContext), 'Update LastTimeSnapOrUnsnapContext Error')
