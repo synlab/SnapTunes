@@ -89,7 +89,7 @@ function App() {
   const { octave } = ctx.useOctave()
   const { requestClear } = ctx.useUpdateClear();
 
-  // Refs for tracking individual state variables of a 
+  // Refs for tracking individual state variables of a device without triggering re-renders. These are used for playback and group synchronization logic.
   const progressRef = useRef<number>(0)
   const animFrameRef = useRef<number | null>(null)
   const startTimeRef = useRef<number | null>(null)
