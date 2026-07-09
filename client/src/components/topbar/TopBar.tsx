@@ -4,6 +4,7 @@ import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
 import PauseRoundedIcon from '@mui/icons-material/PauseRounded'
 import StopRoundedIcon from '@mui/icons-material/StopRounded'
 import VolumeDownRoundedIcon from '@mui/icons-material/VolumeDownRounded'
+import UndoRoundedIcon from '@mui/icons-material/UndoRounded'
 import VolumeUpRoundedIcon from '@mui/icons-material/VolumeUpRounded'
 import VolumeOffRoundedIcon from '@mui/icons-material/VolumeOffRounded'
 import FullscreenIcon from '@mui/icons-material/Fullscreen'
@@ -67,7 +68,7 @@ const INSTRUMENT_PRESETS: InstrumentPreset[] = [
 
 export function TopBar({ volume, setVolume, displayedBpm, isGroupBpmLocked, groupedControlsDisabled, audioContextUnlocked, onPlayPause, onStop }: TopBarProps) {
   const { playback } = ctx.usePlayback()
-
+  const { setUndo } = ctx.useUpdateUndo()
   const { setBPM } = ctx.useUpdateBPM()
 
   const { instrument } = ctx.useInstrument()
@@ -246,6 +247,14 @@ export function TopBar({ volume, setVolume, displayedBpm, isGroupBpmLocked, grou
         <Tooltip title={groupedControlsDisabled ? 'Waiting for server sync...' : 'Stop'} placement="bottom">
           <IconButton sx={buttonStyle} disabled={groupedControlsDisabled} onClick={onStop}>
             <StopRoundedIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      </div>
+
+      <div>
+        <Tooltip title="undo" placement="top">
+          <IconButton onClick={() => setUndo(true)} sx={buttonStyle}>
+            <UndoRoundedIcon fontSize="small" />
           </IconButton>
         </Tooltip>
       </div>

@@ -47,6 +47,7 @@ interface NoteLabelCellProps {
   accentColor: string
 }
 
+
 const DRAG_OVERLAY_ENTER_PULSE_KEYFRAMES = `@keyframes dragOverlayEnterPulse {
   0% { transform: scale(1); }
   50% { transform: scale(1.08); }
@@ -87,9 +88,8 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
   const { composition } = ctx.useComposition()
   const { setComposition } = ctx.useUpdateComposition()
   const { octave } = ctx.useOctave()
-  //TODO: delete
-  const { setOctave } = ctx.useUpdateOctave()
   const { instrument } = ctx.useInstrument()
+
   const activeInstrument = instrument ?? Instrument.Piano
   const activeTheme = INSTRUMENT_THEMES[activeInstrument]
   const [dragOverlay, setDragOverlay] = useState<DragOverlayState>({
@@ -102,10 +102,12 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
   })
   const dragOverlayEnterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+
   //--- References ---//
   const containerRef = useRef<HTMLDivElement | null>(null)
   const p5Ref = useRef<P5Instance | null>(null)
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const historyRef = useRef<Note[][]>([]) // History of compositions for undo functionality
 
   // Refs to sync context state with p5 sketch without remounting
   const drawStateRef = useRef<boolean>(drawState)
@@ -493,10 +495,13 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
         }
 
         if (undoRef.current) {
-          compositionTemp.pop()
-          drawGesture = null
-          clearDragAndDropState()
-          setUndo(false)
+          // Undo functionality: revert to the last composition state in history
+          historyRef.current.pop() // Remove the last state after undo
+          compositionTemp = historyRef.current[historyRef.current.length - 1] || [] // Revert to the previous state or empty if history is empty
+          setComposition(compositionTemp) // Update the composition state
+          drawGesture = null // Clear any ongoing draw gesture
+          clearDragAndDropState() // Clear any drag-and-drop state
+          setUndo(false) // Reset the undo flag in context to prevent repeated undos
         }
 
         if (!drawStateRef.current) {
@@ -601,6 +606,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
         if (clickedNote) {
           compositionTemp = compositionTemp.filter((note) => note !== clickedNote)
           setComposition(compositionTemp)
+          historyRef.current.push([...compositionTemp]) // Save state for undo
         }
       }
 
@@ -621,6 +627,8 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
             }
 
             setComposition(compositionTemp)
+            //Add new composition state to history for undo functionality
+            historyRef.current.push([...compositionTemp])
             drawGesture = null
             clearDragAndDropState()
             return
@@ -642,6 +650,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
             const note = gridSpanToNote(drawGesture.anchorCol, drawGesture.currentCol, drawGesture.row)
             compositionTemp = applyNotesToComposition(compositionTemp, [note])
             setComposition(compositionTemp)
+            historyRef.current.push([...compositionTemp]) // Save state for undo
           }
 
           drawGesture = null
