@@ -604,9 +604,9 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
       p.doubleClicked = () => {
         const clickedNote = getNoteAtPosition(p.mouseX, p.mouseY)
         if (clickedNote) {
+           historyRef.current.push([...compositionTemp]) // Save previous state for undo
           compositionTemp = compositionTemp.filter((note) => note !== clickedNote)
           setComposition(compositionTemp)
-          historyRef.current.push([...compositionTemp]) // Save state for undo
         }
       }
 
@@ -618,17 +618,22 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
           if (activeDraggedNote) {
             const releasedInside = isInsideRelativeElementPosition(p.mouseX, p.mouseY, p.width, p.height)
             const compositionWithoutSource = compositionTemp.filter((note) => note !== activeDraggedNote?.sourceNote)
-
-            if (releasedInside) {
+            
+              if (releasedInside) {
               compositionTemp = applyNotesToComposition(compositionWithoutSource, [activeDraggedNote.draftNote])
             } else {
               // Releasing outside canvas permanently removes the dragged note.
               compositionTemp = compositionWithoutSource
             }
 
+
             setComposition(compositionTemp)
-            //Add new composition state to history for undo functionality
-            historyRef.current.push([...compositionTemp])
+            
+            const samePositionAsSource = activeDraggedNote.sourceNote.startTime === activeDraggedNote.draftNote.startTime &&
+              activeDraggedNote.sourceNote.pitch === activeDraggedNote.draftNote.pitch
+            if(!samePositionAsSource) { // Save state for undo only if the note was actually moved
+              historyRef.current.push([...compositionTemp]) //Add new composition state to history for undo functionality
+            }
             drawGesture = null
             clearDragAndDropState()
             return
