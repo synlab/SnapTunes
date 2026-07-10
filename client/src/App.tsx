@@ -30,6 +30,7 @@ import { generateRequestId, getCompositionDurationMs, getCompositionDurationSec 
 import { useSamplerTransport } from './app/useSamplerTransport'
 import * as Tone from 'tone';
 import { MovementManagerDeviceEvent } from 'simsnap-core/src/entities/VirtualRoom/MovementManager'
+import { OctaveChangeTiltAnalyzer, type CompletedInteraction } from './app/services/TiltAnalyzerService'
 
 
 //For visualizing snap borders between devices
@@ -70,11 +71,15 @@ interface GroupPlaybackDebugSnapshot {
 const SHOW_DEBUG_OVERLAY = {
   server: true, // Gives information about the server connection status (connected/disconnected)
   group: false, // Gives information about the current group, position, and shared bpm
-  playback: false // Shows playback-related debug information
+  playback: false, // Shows playback-related debug information
+  tilt: true, // Shows the latest orientation values and analyzer state for tilt gestures
 }
 
 // Send a clock sync request every 5 seconds to keep the local clock offset estimate up to date
 const CLOCK_SYNC_INTERVAL_MS = 5000
+
+const sound = new Audio('audio/feeback/OctaveChangeUp.wav');
+
 
 
 type GroupControlCommand = 'play' | 'pause' | 'stop'
@@ -88,6 +93,7 @@ function App() {
   const { composition } = ctx.useComposition()
   const { drumsComposition } = ctx.useDrumsComposition()
   const { octave } = ctx.useOctave()
+  const { setOctave } = ctx.useUpdateOctave()
   const { requestClear } = ctx.useUpdateClear();
 
   // Context for tracking the last time a snap or unsnap event occurred, used to determine if an undo should be triggered after such events.
@@ -127,6 +133,8 @@ function App() {
     scheduleToken: null,
     serverClockOffsetMs: 0,
   })
+  const [tiltDebugSnapshot, setTiltDebugSnapshot] = useState<ReturnType<OctaveChangeTiltAnalyzer['getDebugSnapshot']> | null>(null)
+  const octaveTiltAnalyzerRef = useRef<OctaveChangeTiltAnalyzer | null>(null)
   const groupCommandTimeoutRef = useRef<number | null>(null)
   const groupCommandPendingRef = useRef<GroupControlCommand | null>(null)
 
@@ -136,6 +144,21 @@ function App() {
     drumsCompositionRef,
     octaveRef,
   })
+
+  useEffect(() => {
+    octaveTiltAnalyzerRef.current = new OctaveChangeTiltAnalyzer((interaction: CompletedInteraction) => {
+      if (interaction.type === 'octaveChangeUp') {
+        setOctave((prev) => prev + 1)
+        sound.play();
+      } else if (interaction.type === 'octaveChangeDown') {
+        setOctave((prev) => prev - 1)
+      }
+    })
+
+    return () => {
+      octaveTiltAnalyzerRef.current = null
+    }
+  }, [setOctave])
 
   const selfDeviceId = musicGroupState?.selfDeviceId ?? null
   const selfDeviceState = selfDeviceId ? musicGroupState?.devices[selfDeviceId] : undefined
@@ -607,6 +630,19 @@ function App() {
     }
   };
 
+  useEffect(() => {
+    const handleDeviceOrientation = (event: DeviceOrientationEvent) => {
+      octaveTiltAnalyzerRef.current?.addARecord(event)
+      setTiltDebugSnapshot(octaveTiltAnalyzerRef.current?.getDebugSnapshot() ?? null)
+    }
+
+    window.addEventListener('deviceorientation', handleDeviceOrientation)
+
+    return () => {
+      window.removeEventListener('deviceorientation', handleDeviceOrientation)
+    }
+  }, [setOctave])
+
   // Device motion effect
   useEffect(() => {
     const handleDeviceAcceleration = (event: DeviceMotionEvent) => {
@@ -1005,6 +1041,35 @@ function App() {
         scheduleToken={groupPlaybackDebugSnapshot.scheduleToken}
         serverClockOffsetMs={groupPlaybackDebugSnapshot.serverClockOffsetMs}
       />
+
+      {SHOW_DEBUG_OVERLAY.tilt && tiltDebugSnapshot && (
+        <div
+          style={{
+            position: 'absolute',
+            right: '12px',
+            bottom: '12px',
+            zIndex: 50,
+            background: 'rgba(0, 0, 0, 0.82)',
+            color: '#fff',
+            padding: '8px 10px',
+            borderRadius: '6px',
+            fontFamily: 'monospace',
+            fontSize: '12px',
+            lineHeight: 1.4,
+            maxWidth: '280px',
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: '4px' }}>Tilt debug</div>
+          <div>alpha: {tiltDebugSnapshot.latestRecord?.alpha?.toFixed(1) ?? 'n/a'}</div>
+          <div>beta: {tiltDebugSnapshot.latestRecord?.beta?.toFixed(1) ?? 'n/a'}</div>
+          <div>gamma: {tiltDebugSnapshot.latestRecord?.gamma?.toFixed(1) ?? 'n/a'}</div>
+          {tiltDebugSnapshot.machines.map((machine) => (
+            <div key={machine.type}> 
+              {machine.type}: {machine.state}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
