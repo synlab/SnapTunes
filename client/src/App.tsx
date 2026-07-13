@@ -977,7 +977,7 @@ function App() {
       ref={containerRef}
       style={{
         display: 'grid',
-        gridTemplateRows: '1fr 9fr 2fr',
+        gridTemplateRows: '1fr 8fr',
         gridGap: '0.5rem',
         width: '100vw',
         height: '100vh',
@@ -1004,7 +1004,7 @@ function App() {
               onStop={handleStop}
             />
             {instrument === Instrument.Drums ? <DrumSpace progressRef={progressRef} /> : <NoteSpace progressRef={progressRef} />}
-            {/**<ControlPanel />**/}
+            
           </ctx.SFXContextProvider>
         </ctx.UndoContextProvider>
       </ctx.DrawStateContextProvider>
