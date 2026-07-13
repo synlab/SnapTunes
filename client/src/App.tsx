@@ -79,9 +79,8 @@ const SHOW_DEBUG_OVERLAY = {
 // Send a clock sync request every 5 seconds to keep the local clock offset estimate up to date
 const CLOCK_SYNC_INTERVAL_MS = 5000
 
-const sound = new Audio('audio/feeback/OctaveChangeUp.wav');
-
-
+const soundOctaveUp = new Audio('/audio/feedback/OctaveChangeUp.wav');
+const soundOctaveDown = new Audio('/audio/feedback/OctaveChangeDown.wav');
 
 type GroupControlCommand = 'play' | 'pause' | 'stop'
 
@@ -110,6 +109,8 @@ function App() {
   const drumsCompositionRef = useRef<Note[]>(drumsComposition)
   const octaveRef = useRef<number>(octave)
 
+   soundOctaveDown.volume = 0.1
+   soundOctaveUp.volume = 0.1
   // Refs for tracking the local device's group context and shared playback state
   const selfGroupContextRef = useRef<SelfGroupContext>({ groupId: null, columnIndex: null, sharedBpm: null })
   const serverClockOffsetMsRef = useRef<number>(0)
@@ -150,9 +151,10 @@ function App() {
     octaveTiltAnalyzerRef.current = new OctaveChangeTiltAnalyzer((interaction: CompletedInteraction) => {
       if (interaction.type === 'octaveChangeUp') {
         setOctave((prev) => prev + 1)
-        sound.play();
+        soundOctaveUp.play();
       } else if (interaction.type === 'octaveChangeDown') {
         setOctave((prev) => prev - 1)
+        soundOctaveDown.play();
       }
     })
 
@@ -937,7 +939,6 @@ function App() {
     } else { //Going above 0 dB is risky. It can harm your audio quality, your equipment, and your hearing
       Tone.getDestination().mute = true; //Safety silent mode
     }
-
   }, [volume])
 
   useEffect(() => {
