@@ -30,7 +30,8 @@ import { generateRequestId, getCompositionDurationMs, getCompositionDurationSec 
 import { useSamplerTransport } from './app/useSamplerTransport'
 import * as Tone from 'tone';
 import { MovementManagerDeviceEvent } from 'simsnap-core/src/entities/VirtualRoom/MovementManager'
-import { OctaveChangeTiltAnalyzer, type CompletedInteraction } from './app/services/TiltAnalyzerService'
+import { type CompletedInteraction } from './app/services/TiltAnalyzerService'
+import { OctaveChangeTiltAnalyzer } from './app/services/OctaveChangeTiltAnalyzer'
 
 
 //For visualizing snap borders between devices
