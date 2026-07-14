@@ -77,11 +77,12 @@ export class OctaveChangeTiltAnalyzer extends TiltAnalyzer {
 
             const actualHoldDurationMs = record.timestamp - (machine.holdEnteredAt ?? record.timestamp)
             const minimalHoldDuration = 2000 // 2 seconds
+            const maximalDurationToReturn = 3000 // 3 seconds
 
             // The checkpoint only validates after the target has been held long enough.
             if (actualHoldDurationMs >= minimalHoldDuration) {
                 machine.state = 'AWAITING_RETURN'
-                machine.returnDeadline = (machine.holdEnteredAt ?? record.timestamp) + 7000
+                machine.returnDeadline = (machine.holdEnteredAt ?? record.timestamp) + minimalHoldDuration + maximalDurationToReturn
             }
             return
         }
@@ -104,15 +105,14 @@ export class OctaveChangeTiltAnalyzer extends TiltAnalyzer {
         const neutralGamma = gestureType === 'octaveChangeUp' ? 90 : -90
 
         return (
-            this.isWithinTolerance(record.gamma, neutralGamma, 20) ||
-            this.isWithinTolerance(record.gamma, -neutralGamma, 20)
+            this.isWithinTolerance(record.gamma, neutralGamma, 15) ||
+            this.isWithinTolerance(record.gamma, -neutralGamma, 15)
         )
     }
 
     private isTargetSample(record: DeviceOrientationRecord, gestureType: GestureMachine['type']): boolean {
-        const targetGamma = gestureType === 'octaveChangeUp' ? -45 : 45
-
-        return this.isWithinTolerance(record.gamma, targetGamma, 20)
+        const targetGamma = gestureType === 'octaveChangeUp' ? -35 : 40
+        return this.isWithinTolerance(record.gamma, targetGamma, 15)
     }
 
     private resetMachine(machine: GestureMachine): void {
