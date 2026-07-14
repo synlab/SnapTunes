@@ -18,15 +18,15 @@ Consider this hierarchy graph:
 |
 **App**
 |
-**TopBar** - **NoteSpace** - **ControlPanel**
+**TopBar** - **NoteSpace**
 
-With how the context file is setup, buttons in the **TopBar** and **ControlPanel** can change the state of the canvas in NoteSpace without having to pass anything up one level to App!
+With how the context file is setup, buttons in the **TopBar** can change the state of the canvas in NoteSpace without having to pass anything up one level to App!
 
 Without having to dive into the code, here's a little guide on how I've split up the contexts, and the reasoning behind this:
 
 octave, clear {App}
 
-all others {TopBar, NoteSpace, ControlPanel}
+all others {TopBar, NoteSpace}
 
 _Octave_ and _Clear_ contexts are at the **App.jsx** level because we had planned two clientside tangible interactions: shake to clear, and tilt to change octave. Accelerometer/Gyroscope data should be handled at the App level, so App should have access to these contexts.
 
