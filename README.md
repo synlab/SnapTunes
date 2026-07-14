@@ -14,6 +14,7 @@ WIP
 7. On your device (a tablet, for example), open a web page with this link. You should see a "Your connection is not private" warning page. Click the "ADVANCED" button, then "Proceed to {client link} (unsafe)".
 8. Open another web tab, connect to the same link but replace `5173` with `4000`, and repeat the same steps for the warning page that pops up.
 9. Go back to the client tab and enjoy SnapTunes! (Repeat steps 7 and 8 for every device you want to use SnapTunes with.)
+10. You can activate/deactivate debug overlays by switching boolean values in [debugHandler.ts](client\src\app\debugHandler.ts).
 
 ## Tech Stack
 - **Frontend:** React (Vite)

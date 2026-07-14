@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { TopBar } from './components/topbar/TopBar'
 import { NoteSpace } from './components/notespace/NoteSpace'
 import { DrumSpace } from './components/notespace/DrumSpace'
-import { ControlPanel } from './components/ControlPanel'
+import {SHOW_DEBUG_OVERLAY} from './app/debugHandler'
 import { ServerStatusOverlay } from './components/overlays/ServerStatusOverlay'
 import { GroupStatusOverlay } from './components/overlays/GroupStatusOverlay'
 import { GroupDebugOverlay } from './components/overlays/GroupDebugOverlay'
@@ -68,13 +68,6 @@ interface GroupPlaybackDebugSnapshot {
   serverClockOffsetMs: number
 }
 
-// Debug overlay toggle flags, set to true to enable the corresponding overlay for development and testing purposes.
-const SHOW_DEBUG_OVERLAY = {
-  server: true, // Gives information about the server connection status (connected/disconnected)
-  group: false, // Gives information about the current group, position, and shared bpm
-  playback: false, // Shows playback-related debug information
-  tilt: true, // Shows the latest orientation values and analyzer state for tilt gestures
-}
 
 // Send a clock sync request every 5 seconds to keep the local clock offset estimate up to date
 const CLOCK_SYNC_INTERVAL_MS = 5000
