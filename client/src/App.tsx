@@ -141,11 +141,12 @@ function App() {
   })
 
   useEffect(() => {
+
     octaveTiltAnalyzerRef.current = new OctaveChangeTiltAnalyzer((interaction: CompletedInteraction) => {
-      if (interaction.type === 'octaveChangeUp') {
+      if (interaction.type === 'octaveChangeUp' && octave < 8) {
         setOctave((prev) => prev + 1)
         soundOctaveUp.play();
-      } else if (interaction.type === 'octaveChangeDown') {
+      } else if (interaction.type === 'octaveChangeDown' && octave > 0) {
         setOctave((prev) => prev - 1)
         soundOctaveDown.play();
       }
@@ -154,7 +155,7 @@ function App() {
     return () => {
       octaveTiltAnalyzerRef.current = null
     }
-  }, [setOctave])
+  }, [])
 
   const selfDeviceId = musicGroupState?.selfDeviceId ?? null
   const selfDeviceState = selfDeviceId ? musicGroupState?.devices[selfDeviceId] : undefined
