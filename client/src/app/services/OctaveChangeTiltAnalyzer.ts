@@ -36,6 +36,12 @@ export class OctaveChangeTiltAnalyzer extends TiltAnalyzer {
     }
 
     private stepMachine(machine: GestureMachine, record: DeviceOrientationRecord): void {
+        const isDeviceHeldInLandscapeMode = record.beta !== null && (this.isWithinTolerance(record.beta, 0, 10) || this.isWithinTolerance(record.beta, 180, 10))
+        if(!isDeviceHeldInLandscapeMode) {
+            this.resetMachine(machine)
+            return
+        }
+
         const isNeutral = this.isNeutralSample(record, machine.type)
         const isTarget = this.isTargetSample(record, machine.type)
 
