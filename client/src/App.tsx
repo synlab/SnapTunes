@@ -32,6 +32,7 @@ import * as Tone from 'tone';
 import { MovementManagerDeviceEvent } from 'simsnap-core/src/entities/VirtualRoom/MovementManager'
 import { type CompletedInteraction } from './app/services/TiltAnalyzerService'
 import { OctaveChangeTiltAnalyzer } from './app/services/OctaveChangeTiltAnalyzer'
+import { PourToCopyPasteTiltAnalyzer } from './app/services/PourToCopyPasteTiltAnalyzer'
 
 
 //For visualizing snap borders between devices
@@ -130,6 +131,7 @@ function App() {
   })
   const [tiltDebugSnapshot, setTiltDebugSnapshot] = useState<ReturnType<OctaveChangeTiltAnalyzer['getDebugSnapshot']> | null>(null)
   const octaveTiltAnalyzerRef = useRef<OctaveChangeTiltAnalyzer | null>(null)
+  const pourToCopyTiltAnalyzerRef = useRef<PourToCopyPasteTiltAnalyzer | null>(null)
   const groupCommandTimeoutRef = useRef<number | null>(null)
   const groupCommandPendingRef = useRef<GroupControlCommand | null>(null)
 
@@ -140,6 +142,7 @@ function App() {
     octaveRef,
   })
 
+  //Octave change tilt analyzer setup
   useEffect(() => {
 
     octaveTiltAnalyzerRef.current = new OctaveChangeTiltAnalyzer((interaction: CompletedInteraction) => {
@@ -156,6 +159,23 @@ function App() {
       octaveTiltAnalyzerRef.current = null
     }
   }, [])
+
+  //Pour to copy tilt analyzer setup
+  useEffect(() => {
+
+    pourToCopyTiltAnalyzerRef.current = new PourToCopyPasteTiltAnalyzer((interaction: CompletedInteraction) => {
+      if (interaction.type === 'pourToCopyTowardsLeft') {
+        //Fire copy paste to left to the server
+      } else if (interaction.type === 'pourToCopyTowardsRight') {
+        //Fire copy paste right  to the server
+      }
+    })
+    
+    return () => {
+      pourToCopyTiltAnalyzerRef.current = null
+    }
+  }, [])
+
 
   const selfDeviceId = musicGroupState?.selfDeviceId ?? null
   const selfDeviceState = selfDeviceId ? musicGroupState?.devices[selfDeviceId] : undefined
@@ -631,6 +651,8 @@ function App() {
     const handleDeviceOrientation = (event: DeviceOrientationEvent) => {
       octaveTiltAnalyzerRef.current?.addARecord(event)
       setTiltDebugSnapshot(octaveTiltAnalyzerRef.current?.getDebugSnapshot() ?? null)
+      pourToCopyTiltAnalyzerRef.current?.addARecord(event)
+      setTiltDebugSnapshot(pourToCopyTiltAnalyzerRef.current?.getDebugSnapshot() ?? null)
     }
 
     window.addEventListener('deviceorientation', handleDeviceOrientation)
@@ -997,7 +1019,7 @@ function App() {
               onPlayPause={handlePlayPause}
               onStop={handleStop}
             />
-            {instrument === Instrument.Drums ? <DrumSpace progressRef={progressRef} /> : <NoteSpace progressRef={progressRef} />}
+            {instrument === Instrument.Drums ? <DrumSpace progressRef={progressRef} /> : <NoteSpace progressRef={progressRef} playbackState={playback} />}
             
           </ctx.SFXContextProvider>
         </ctx.UndoContextProvider>

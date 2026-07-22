@@ -7,10 +7,19 @@ import { applyNotesToComposition, gridSpanToNote, isInsideRelativeElementPositio
 
 interface NoteSpaceProps {
   progressRef: RefObject<number>
+  playbackState?: 0 | 1 | 2 | 'stop' // 0 = paused/reset, 1 = playing
 }
 
 type P5Instance = InstanceType<typeof p5>
 type StrokePoint = readonly [number, number]
+type ResizeHandle = 'left' | 'right'
+type SelectionState = {
+  note: Note            // working copy — mutated during resize drag
+  originalNote: Note    // reference identity into compositionTemp for lookups
+  isDraggingHandle: ResizeHandle | null
+  dragStartLength: number
+  dragStartCol: number
+}
 // Draw mode keeps one active ghost note locked to a single pitch row.
 type DrawGesture = {
   anchorCol: number
@@ -80,7 +89,7 @@ const createVisualConfig = (theme: InstrumentTheme) => ({
  * NoteSpace component - Main note composition and drawing area
  * Manages ghost-note input and note composition with conflict handling
  */
-export function NoteSpace({ progressRef }: NoteSpaceProps) {
+export function NoteSpace({ progressRef, playbackState }: NoteSpaceProps) {
   //--- Context hooks ---//
   const { drawState } = ctx.useDrawState()
   const { clearSignal } = ctx.useClear()
@@ -108,7 +117,11 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
     isEntering: false,
   })
   const dragOverlayEnterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
+  // selectedNoteRef is the single source of truth for selection — never useState, to avoid
+  // triggering p5 sketch remounts and React re-renders during pointer interactions.
+  const selectedNoteRef = useRef<SelectionState | null>(null)
+  const tapDetectionRef = useRef<{ noteId: string; x: number; y: number; timestamp: number } | null>(null)
+  const playbackStateRef = useRef< 1 | 2 | 0 | 'stop' | undefined>(playbackState)
 
   //--- References ---//
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -140,8 +153,15 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
   }, [activeTheme])
 
   useEffect(() => {
+    playbackStateRef.current = playbackState
+  }, [playbackState])
+
+  useEffect(() => {
+    // Cancel selection on any snap/unsnap gesture
+    selectedNoteRef.current = null
+
     const difference = Math.abs(lastCompositionUpdateTime - lastTimeSnapOrUnsnapContext)
-    if (difference < 50) { // If the last composition update was within 50ms of the last snap/unsnap event, trigger undo
+    if (difference < 50) {
       setUndo(true)
     }
   }, [lastTimeSnapOrUnsnapContext])
@@ -155,7 +175,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
     if (!containerRef.current) return;
 
     const sketch = (p: P5Instance) => {
-      const LONG_PRESS_MS = 100
+      const LONG_PRESS_MS = 400
       const LONG_PRESS_MOVE_TOLERANCE_PX = 10
       const isMelodicClearTarget = (target: ctx.ClearTarget): boolean =>
         target === 'all' || target === 'melodic'
@@ -168,6 +188,9 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
       let activeDraggedNote: ActiveDraggedNote | null = null
       // Tracks the last clear event consumed by this sketch instance.
       let lastHandledClearSeq = clearSignalRef.current.seq
+      // Local selection state mirror for sketch (to avoid state update latency)
+      let sketchSelectedNote: SelectionState | null = null
+      const HANDLE_WIDTH = 14 // Half-width in pixels for handle hit detection and rendering
 
       const clearLongPressTimer = () => {
         if (!longPressTimerRef.current) return
@@ -179,6 +202,8 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
         clearLongPressTimer()
         pendingLongPressDrag = null
         activeDraggedNote = null
+        // Only clear selection if not explicitly keeping it
+        // (selection is managed separately)
         if (dragOverlayEnterTimerRef.current) {
           clearTimeout(dragOverlayEnterTimerRef.current)
           dragOverlayEnterTimerRef.current = null
@@ -206,6 +231,47 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
           width: note.duration * p.width,
           height: rowHeight,
         }
+      }
+
+      const getHandleAtPosition = (x: number, y: number, note: Note): ResizeHandle | null => {
+        const rect = getNoteRect(note)
+        const rowHeight = p.height / GRID_ROWS
+        const isVerticallyInNote = y >= rect.y && y <= rect.y + rect.height
+        if (!isVerticallyInNote) return null
+
+        const leftEdge = rect.x
+        const rightEdge = rect.x + rect.width
+
+        if (Math.abs(x - leftEdge) <= HANDLE_WIDTH) return 'left'
+        if (Math.abs(x - rightEdge) <= HANDLE_WIDTH) return 'right'
+        return null
+      }
+
+      const applyResizeToNote = (note: Note, newStartCol: number, newEndCol: number): Note => {
+        const duration = Math.max(1, newEndCol - newStartCol + 1) / GRID_COLS
+        return new Note(note.pitch, newStartCol / GRID_COLS, duration)
+      }
+
+      /**
+       * Commits the selected note’s working copy to composition using the same
+       * split-or-replace overlap logic as note creation and move.
+       * Called on normal selection exit; NOT called on gesture-cancel (discard).
+       */
+      const commitSelectionExit = () => {
+        if (!sketchSelectedNote) return
+        const original = sketchSelectedNote.originalNote
+        const updated = sketchSelectedNote.note
+        const changed = original.startTime !== updated.startTime || original.duration !== updated.duration
+        if (changed) {
+          
+          const withoutOriginal = compositionTemp.filter(n => n !== original)
+          compositionTemp = applyNotesToComposition(withoutOriginal, [updated])
+          historyRef.current.push([...compositionTemp])
+          setComposition([...compositionTemp])
+          setLastCompositionUpdateTime(Date.now())
+        }
+        sketchSelectedNote = null
+        selectedNoteRef.current = null
       }
 
       const updateDragOverlay = (pointerX: number, pointerY: number) => {
@@ -300,10 +366,9 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
       }
 
 
-      /**
-       * Setup p5 canvas
-       */
       p.setup = () => {
+        sketchSelectedNote = selectedNoteRef.current
+
         const width = containerRef.current?.offsetWidth ?? 0
         const height = containerRef.current?.offsetHeight ?? 0
         const canvas = p.createCanvas(width, height)
@@ -378,15 +443,19 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
             continue
           }
 
-          const pitchIndex = CHROMATIC_NOTES.indexOf(note.pitch as (typeof CHROMATIC_NOTES)[number])
-          const x = note.startTime * p.width
+          // For the selected note, render the working copy so resize is visible in real time.
+          const isSelected = sketchSelectedNote !== null && note === sketchSelectedNote.originalNote
+          const displayNote = isSelected ? sketchSelectedNote!.note : note
+
+          const pitchIndex = CHROMATIC_NOTES.indexOf(displayNote.pitch as (typeof CHROMATIC_NOTES)[number])
+          const x = displayNote.startTime * p.width
           const y = pitchIndex * rowHeight
-          const width = note.duration * p.width
+          const width = displayNote.duration * p.width
           const height = rowHeight
 
           p.fill(...visualConfig.note.fill)
           p.stroke(...visualConfig.note.stroke)
-          p.strokeWeight(visualConfig.note.lineWeight)
+          p.strokeWeight(isSelected ? 3 : visualConfig.note.lineWeight)
           p.rect(x, y, width, height)
         }
       }
@@ -473,6 +542,36 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
         p.rect(x, y + height - 3, width * progress, 3)
       }
 
+      const drawDoubleArrowHandle = (cx: number, cy: number, noteHeight: number, color: readonly [number, number, number]) => {
+        const bgH = Math.min(noteHeight * 0.75, 26)
+        const arrowH = bgH * 0.3
+        const tipX = HANDLE_WIDTH - 3
+
+        // Pill background
+        p.fill(...color, 200)
+        p.noStroke()
+        p.rect(cx - HANDLE_WIDTH, cy - bgH / 2, HANDLE_WIDTH * 2, bgH, 4)
+
+        // White arrowheads
+        p.fill(255, 255, 255, 245)
+        p.triangle(cx - tipX, cy, cx - 2, cy - arrowH, cx - 2, cy + arrowH) // left arrow
+        p.triangle(cx + tipX, cy, cx + 2, cy - arrowH, cx + 2, cy + arrowH) // right arrow
+        // Center divider bar
+        p.rect(cx - 1, cy - arrowH * 0.6, 2, arrowH * 1.2)
+      }
+
+      const drawSelectedNoteHandles = () => {
+        if (!sketchSelectedNote) return
+
+        const note = sketchSelectedNote.note
+        const rect = getNoteRect(note)
+        const cy = rect.y + rect.height / 2
+        const visualConfig = createVisualConfig(instrumentThemeRef.current)
+
+        drawDoubleArrowHandle(rect.x, cy, rect.height, visualConfig.note.stroke)
+        drawDoubleArrowHandle(rect.x + rect.width, cy, rect.height, visualConfig.note.stroke)
+      }
+
       /**
        * Renders erase strokes
        */
@@ -496,6 +595,10 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
       * Main draw loop
       */
       p.draw = () => {
+        // Sync selection from ref into local sketch variable each frame.
+        // Using a ref avoids remounting the sketch when selection changes.
+        sketchSelectedNote = selectedNoteRef.current
+
         const latestClearSignal = clearSignalRef.current
         if (latestClearSignal.seq !== lastHandledClearSeq) {
           lastHandledClearSeq = latestClearSignal.seq
@@ -504,6 +607,8 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
             compositionTemp = []
             currentStroke = []
             drawGesture = null
+            sketchSelectedNote = null
+            selectedNoteRef.current = null
             clearDragAndDropState()
             setComposition([])
           }
@@ -511,15 +616,18 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
 
         if (undoRef.current) {
           // Undo functionality: revert to the last composition state in history
-          historyRef.current.pop() // Remove the last state after undo
-          compositionTemp = historyRef.current[historyRef.current.length - 1] || [] // Revert to the previous state or empty if history is empty
-          setComposition(compositionTemp) // Update the composition state
-          drawGesture = null // Clear any ongoing draw gesture
-          clearDragAndDropState() // Clear any drag-and-drop state
-          setUndo(false) // Reset the undo flag in context to prevent repeated undos
+          historyRef.current.pop()
+          compositionTemp = historyRef.current[historyRef.current.length - 1] || []
+          setComposition(compositionTemp)
+          drawGesture = null
+          sketchSelectedNote = null
+          selectedNoteRef.current = null
+          clearDragAndDropState()
+          setUndo(false)
         }
 
         if (!drawStateRef.current) {
+          commitSelectionExit() // commit any pending resize before leaving draw mode
           drawGesture = null
           clearDragAndDropState()
         }
@@ -535,18 +643,57 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
           drawPendingLongPressPreview()
           drawGhostNote()
           drawDraggedNotePreview()
+          drawSelectedNoteHandles()
         }
       }
 
       p.mousePressed = () => {
         if (!isInsideRelativeElementPosition(p.mouseX, p.mouseY, p.width, p.height)) {
+          // Tap anywhere outside canvas — commit and deselect if a note was selected
+          if (sketchSelectedNote) commitSelectionExit()
           return
         }
 
         if (drawStateRef.current) {
+          // If a note is selected, check if we're clicking on a handle for resize
+          if (sketchSelectedNote) {
+            const handle = getHandleAtPosition(p.mouseX, p.mouseY, sketchSelectedNote.note)
+            if (handle) {
+              // Start resize drag — record the fixed edge col for snapping
+              const startCol = Math.round(sketchSelectedNote.note.startTime * GRID_COLS)
+              const durationCols = Math.max(1, Math.round(sketchSelectedNote.note.duration * GRID_COLS))
+              sketchSelectedNote.isDraggingHandle = handle
+              sketchSelectedNote.dragStartLength = durationCols
+              sketchSelectedNote.dragStartCol = startCol
+              // selectedNoteRef.current is the same object — mutation is reflected immediately
+              return
+            }
+
+            // Tapping inside the selected note (not on a handle): stay in selection mode,
+            // block long-press drag and draw gesture activation.
+            const rect = getNoteRect(sketchSelectedNote.note)
+            const insideSelectedNote = p.mouseX >= rect.x && p.mouseX <= rect.x + rect.width &&
+              p.mouseY >= rect.y && p.mouseY <= rect.y + rect.height
+            if (insideSelectedNote) {
+              return
+            }
+
+            // Tapped outside — commit resize (if any) and deselect.
+            // Return immediately: the tap that deselects must NOT also draw a new note.
+            commitSelectionExit()
+            return
+          }
+
           const noteUnderPointer = getNoteAtPosition(p.mouseX, p.mouseY)
           if (noteUnderPointer) {
+            // Start tap detection for single-tap selection
             drawGesture = null
+            tapDetectionRef.current = {
+              noteId: noteUnderPointer.pitch + noteUnderPointer.startTime,
+              x: p.mouseX,
+              y: p.mouseY,
+              timestamp: Date.now(),
+            }
             pendingLongPressDrag = {
               sourceNote: noteUnderPointer,
               pressX: p.mouseX,
@@ -556,7 +703,9 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
 
             clearLongPressTimer()
             longPressTimerRef.current = setTimeout(() => {
-              if (!pendingLongPressDrag) return
+              if (!pendingLongPressDrag || !tapDetectionRef.current) return
+              // Long press -> activate drag-to-move
+              tapDetectionRef.current = null
               beginActiveDragFromNote(
                 pendingLongPressDrag.sourceNote,
                 pendingLongPressDrag.pressX,
@@ -585,6 +734,26 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
        */
       p.mouseDragged = () => {
         if (drawStateRef.current) {
+          // If dragging a resize handle, update the draft resize
+          if (sketchSelectedNote && sketchSelectedNote.isDraggingHandle) {
+            const { col } = clampPointerToGrid(p.mouseX, p.mouseY)
+            const startCol = sketchSelectedNote.dragStartCol
+            const maxCol = GRID_COLS - 1
+
+            if (sketchSelectedNote.isDraggingHandle === 'left') {
+              // Dragging left edge: move start, keep end fixed
+              const endCol = sketchSelectedNote.dragStartCol + sketchSelectedNote.dragStartLength - 1
+              const newStartCol = Math.max(0, Math.min(col, endCol - 1))
+              sketchSelectedNote.note = applyResizeToNote(sketchSelectedNote.note, newStartCol, endCol)
+            } else {
+              // Dragging right edge: keep start fixed, extend/shrink end
+              const newEndCol = Math.max(startCol, Math.min(col, maxCol))
+              sketchSelectedNote.note = applyResizeToNote(sketchSelectedNote.note, startCol, newEndCol)
+            }
+            // No setState — selectedNoteRef.current is the same object, mutation is visible next frame
+            return
+          }
+
           if (activeDraggedNote) {
             updateActiveDragDraft(p.mouseX, p.mouseY)
             return
@@ -597,6 +766,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
 
             if (movedDistance > LONG_PRESS_MOVE_TOLERANCE_PX) {
               clearLongPressTimer()
+              tapDetectionRef.current = null // Cancel tap detection if we move too far
               pendingLongPressDrag = null
             }
             return
@@ -622,8 +792,11 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
           historyRef.current.push([...compositionTemp]) // Save previous state for undo
           compositionTemp = compositionTemp.filter((note) => note !== clickedNote)
           setComposition(compositionTemp)
-          // Update the last composition update time to help determine if it was performed while atempting to snap/unsnap the device.
-          // (The only use of this following line would be if the user double-clicks to remove a note while snapping/unsnapping, which is a rare case, but we want to be consistent.)
+          // Clear selection if the deleted note was the selected one
+          if (sketchSelectedNote && sketchSelectedNote.originalNote === clickedNote) {
+            sketchSelectedNote = null
+            selectedNoteRef.current = null
+          }
           setLastCompositionUpdateTime(Date.now())
         }
       }
@@ -633,6 +806,15 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
        */
       p.mouseReleased = () => {
         if (drawStateRef.current) {
+          // Handle released — just stop dragging; commit happens when selection is exited.
+          if (sketchSelectedNote && sketchSelectedNote.isDraggingHandle) {
+            sketchSelectedNote.isDraggingHandle = null
+            sketchSelectedNote.dragStartLength = 0
+            sketchSelectedNote.dragStartCol = 0
+            // selectedNoteRef.current is the same object — mutations already reflected
+            return
+          }
+
           if (activeDraggedNote) {
             const releasedInside = isInsideRelativeElementPosition(p.mouseX, p.mouseY, p.width, p.height)
             const compositionWithoutSource = compositionTemp.filter((note) => note !== activeDraggedNote?.sourceNote)
@@ -646,11 +828,11 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
 
 
             setComposition(compositionTemp)
-            setLastCompositionUpdateTime(Date.now()) // Update the last composition update time to help determine if it was performed while atempting to snap/unsnap the device.
+            setLastCompositionUpdateTime(Date.now())
             const samePositionAsSource = activeDraggedNote.sourceNote.startTime === activeDraggedNote.draftNote.startTime &&
               activeDraggedNote.sourceNote.pitch === activeDraggedNote.draftNote.pitch
-            if (!samePositionAsSource) { // Save state for undo only if the note was actually moved
-              historyRef.current.push([...compositionTemp]) //Add new composition state to history for undo functionality
+            if (!samePositionAsSource) {
+              historyRef.current.push([...compositionTemp])
             }
             drawGesture = null
             clearDragAndDropState()
@@ -658,9 +840,34 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
           }
 
           if (pendingLongPressDrag) {
+            // Check if this was a single tap (press + release without significant movement)
+            if (tapDetectionRef.current) {
+              const deltaX = p.mouseX - tapDetectionRef.current.x
+              const deltaY = p.mouseY - tapDetectionRef.current.y
+              const movedDistance = Math.hypot(deltaX, deltaY)
+
+              // Single tap: enter selection mode (only if playback is paused or at 0)
+              if (movedDistance < LONG_PRESS_MOVE_TOLERANCE_PX ){ //&& (playbackStateRef.current === 0 || !playbackStateRef.current)) {
+                const sourceNote = pendingLongPressDrag.sourceNote
+                sketchSelectedNote = {
+                  note: new Note(sourceNote.pitch, sourceNote.startTime, sourceNote.duration),
+                  originalNote: sourceNote, // reference identity into compositionTemp
+                  isDraggingHandle: null,
+                  dragStartLength: 0,
+                  dragStartCol: 0,
+                }
+                selectedNoteRef.current = sketchSelectedNote
+                tapDetectionRef.current = null
+                drawGesture = null
+                clearDragAndDropState()
+                return
+              }
+            }
+
             // Short press on an existing note intentionally does nothing.
             drawGesture = null
             clearDragAndDropState()
+            tapDetectionRef.current = null
             return
           }
 
@@ -730,7 +937,7 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
             p5Ref.current.resizeCanvas(width, height);
           }
         }
-      }, 150); // wait for 150ms to prevent a performance drop
+      }, 300); // wait for 300ms to prevent a performance drop
     });
 
     resizeObserver.observe(containerRef.current)
@@ -746,6 +953,8 @@ export function NoteSpace({ progressRef }: NoteSpaceProps) {
         dragOverlayEnterTimerRef.current = null
       }
       setDragOverlay((prev) => (prev.visible ? { ...prev, visible: false, isEntering: false } : prev))
+      selectedNoteRef.current = null
+      tapDetectionRef.current = null
       resizeObserver.disconnect()
       if (p5Ref.current) {
         p5Ref.current.remove()
