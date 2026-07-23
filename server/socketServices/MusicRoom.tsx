@@ -72,7 +72,6 @@ interface PendingPourIntent {
 interface PairExchangeLock {
     firstDeviceId: string;
     secondDeviceId: string;
-    compositionType: 'melodic' | 'drums';
     startedAtByDeviceId: Record<string, number>;
 }
 
@@ -231,14 +230,14 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
             giverIntent.compositionType
         );
 
+        // If both devices are still in the same continuous hold sessions
+        // (same startedAt values), block this repeated exchange.
         if (this.isExchangeStillLocked(exchangeLockKey, giverIntent, receiverIntent)) {
-            this.pendingPourIntentsByDeviceId.delete(giverIntent.deviceId);
-            this.pendingPourIntentsByDeviceId.delete(receiverIntent.deviceId);
+            this.clearResolvedPairIntents(giverIntent.deviceId, receiverIntent.deviceId);
             return;
         }
 
-        this.pendingPourIntentsByDeviceId.delete(giverIntent.deviceId);
-        this.pendingPourIntentsByDeviceId.delete(receiverIntent.deviceId);
+        this.clearResolvedPairIntents(giverIntent.deviceId, receiverIntent.deviceId);
 
         const transferPayload: PourTransferResolvedPayload = {
             giverDeviceId: giverIntent.deviceId,
@@ -732,6 +731,11 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         this.pairExchangeLocksByKey.clear();
     }
 
+    private clearResolvedPairIntents(firstDeviceId: string, secondDeviceId: string): void {
+        this.pendingPourIntentsByDeviceId.delete(firstDeviceId);
+        this.pendingPourIntentsByDeviceId.delete(secondDeviceId);
+    }
+
     private pruneExchangeLocksForDevice(deviceId: string): void {
         Array.from(this.pairExchangeLocksByKey.entries()).forEach(([key, lock]) => {
             if (lock.firstDeviceId === deviceId || lock.secondDeviceId === deviceId) {
@@ -772,7 +776,7 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         this.pairExchangeLocksByKey.set(exchangeLockKey, {
             firstDeviceId: giverIntent.deviceId,
             secondDeviceId: receiverIntent.deviceId,
-            compositionType: giverIntent.compositionType,
+            // startedAt acts as a hold-session identity for each device.
             startedAtByDeviceId: {
                 [giverIntent.deviceId]: giverIntent.startedAt,
                 [receiverIntent.deviceId]: receiverIntent.startedAt,

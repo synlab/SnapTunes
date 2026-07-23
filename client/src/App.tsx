@@ -236,19 +236,10 @@ function App() {
   const isGrouped = !!selfDeviceState?.groupId && !!selfDeviceState.position && !!currentGroup
   const isSnappedWithAnotherDevice = Boolean(
     selfDeviceState?.groupId &&
-    selfDeviceState.position &&
     musicGroupState &&
-    Object.entries(musicGroupState.devices).some(([deviceId, deviceState]) => {
-      if (deviceId === selfDeviceId) {
-        return false
-      }
-
-      if (deviceState.groupId !== selfDeviceState.groupId) {
-        return false
-      }
-
-      return true
-    })
+    Object.entries(musicGroupState.devices).some(([deviceId, deviceState]) => (
+      deviceId !== selfDeviceId && deviceState.groupId === selfDeviceState.groupId
+    ))
   )
   const playbackBpm = currentGroup?.sharedBpm ?? bpm
 
@@ -760,6 +751,13 @@ function App() {
       return Math.abs(value - target) <= toleranceDeg
     }
 
+    const processTiltEvent = (event: DeviceOrientationEvent): void => {
+      octaveTiltAnalyzerRef.current?.addARecord(event)
+      setTiltDebugSnapshot(octaveTiltAnalyzerRef.current?.getDebugSnapshot() ?? null)
+      pourToCopyTiltAnalyzerRef.current?.addARecord(event)
+      setTiltDebugSnapshot(pourToCopyTiltAnalyzerRef.current?.getDebugSnapshot() ?? null)
+    }
+
     const getActivePourDirectionFromOrientation = (event: DeviceOrientationEvent): 'left' | 'right' | null => {
       const isWithinGammaRange = isWithinTolerance(event.gamma, 0, 5)
       if (!isWithinGammaRange) {
@@ -780,20 +778,16 @@ function App() {
     const handleDeviceOrientation = (event: DeviceOrientationEvent) => {
       if (!hasSnappedNeighborRef.current) {
         setPourAttemptDirection(null)
-        octaveTiltAnalyzerRef.current?.addARecord(event)
-        setTiltDebugSnapshot(octaveTiltAnalyzerRef.current?.getDebugSnapshot() ?? null)
-        pourToCopyTiltAnalyzerRef.current?.addARecord(event)
-        setTiltDebugSnapshot(pourToCopyTiltAnalyzerRef.current?.getDebugSnapshot() ?? null)
+        processTiltEvent(event)
         return
       }
 
+      // The badge is purely local feedback: show only while current sample
+      // is inside a valid pour orientation and the device has neighbors.
       const activePourDirection = getActivePourDirectionFromOrientation(event)
       setPourAttemptDirection(activePourDirection)
 
-      octaveTiltAnalyzerRef.current?.addARecord(event)
-      setTiltDebugSnapshot(octaveTiltAnalyzerRef.current?.getDebugSnapshot() ?? null)
-      pourToCopyTiltAnalyzerRef.current?.addARecord(event)
-      setTiltDebugSnapshot(pourToCopyTiltAnalyzerRef.current?.getDebugSnapshot() ?? null)
+      processTiltEvent(event)
     }
 
     window.addEventListener('deviceorientation', handleDeviceOrientation)
@@ -1034,6 +1028,7 @@ function App() {
         setMusicGroupState(null)
         setPourAttemptDirection(null)
         setPastedFromDirection(null)
+        clearPastedFromDirectionTimer()
       }
     }
 
@@ -1135,11 +1130,6 @@ function App() {
         cancelAnimationLoop()
       }
     }
-
-    // 1 bar(measure) = 4 beats 
-    // for a 4/4 signature (Common Time)
-    // The composition is 16 beats long (4 bar) in 4/4 time.
-    const totalDurationSec = getCompositionDurationSec(playbackBpm)
 
     //Composition is playing
     if (playback === 1) {
