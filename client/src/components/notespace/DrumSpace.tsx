@@ -34,9 +34,23 @@ function initGrid(composition: Note[]): boolean[][] {
   }
 
   return grid
-
 }
 
+function gridsAreEqual(a: boolean[][], b: boolean[][]): boolean {
+  if (a.length !== b.length) return false
+
+  for (let row = 0; row < a.length; row++) {
+    if (a[row].length !== b[row].length) return false
+
+    for (let col = 0; col < a[row].length; col++) {
+      if (a[row][col] !== b[row][col]) {
+        return false
+      }
+    }
+  }
+
+  return true
+}
 
 export function DrumSpace({ progressRef }: DrumSpaceProps) {
 
@@ -56,7 +70,7 @@ export function DrumSpace({ progressRef }: DrumSpaceProps) {
     if (clearSignal.target !== 'all' && clearSignal.target !== 'drums') return
     // seq=0 is the provider's initial value, not a real clear request.
     if (clearSignal.seq === 0) return
-
+    
     // A new matching clear event was emitted, so reset both state layers.
     setDrumsComposition([])
     setGrid(initGrid([]))
@@ -81,6 +95,13 @@ export function DrumSpace({ progressRef }: DrumSpaceProps) {
       }
     }
   }, [progressRef])
+
+  // Keep the local grid in sync with external composition updates
+  // (e.g. when a transfer merge updates drumsComposition in App.tsx).
+  useEffect(() => {
+    const nextGrid = initGrid(drumsComposition)
+    setGrid((previousGrid) => (gridsAreEqual(previousGrid, nextGrid) ? previousGrid : nextGrid))
+  }, [drumsComposition])
 
   //Rebuild drums composition from boolean grid
   useEffect(() => {
