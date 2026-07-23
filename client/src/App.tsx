@@ -94,23 +94,6 @@ interface PourTransferResolvedPayload {
   incomingDrumsComposition: NoteTransferData[]
 }
 
-interface TransferPulse {
-  id: string
-  side: 'left' | 'right'
-  flow: 'incoming' | 'outgoing'
-}
-
-interface TransferDebugSnapshot {
-  role: 'giver' | 'receiver'
-  giverDeviceId: string
-  receiverDeviceId: string
-  directionFromGiver: 'left' | 'right'
-  compositionType: 'melodic' | 'drums'
-  startedAt: number
-  receivedAt: number
-  mergedIncomingNotesCount: number
-}
-
 
 // Send a clock sync request every 5 seconds to keep the local clock offset estimate up to date
 const CLOCK_SYNC_INTERVAL_MS = 5000
@@ -159,7 +142,8 @@ function App() {
   const pendingGroupedStartTokenRef = useRef<number | null>(null)
   const activeGroupedScheduleRef = useRef<ActiveGroupedSchedule | null>(null)
   const selfDeviceIdRef = useRef<string | null>(null)
-  const transferPulseTimersRef = useRef<number[]>([])
+  const pastedFromDirectionTimerRef = useRef<number | null>(null)
+  const hasSnappedNeighborRef = useRef<boolean>(false)
 
 
   const [snapBorders, setSnapBorders] = useState<SnapBorder[]>([])
@@ -176,8 +160,8 @@ function App() {
     serverClockOffsetMs: 0,
   })
   const [tiltDebugSnapshot, setTiltDebugSnapshot] = useState<ReturnType<OctaveChangeTiltAnalyzer['getDebugSnapshot']> | null>(null)
-  const [transferPulses, setTransferPulses] = useState<TransferPulse[]>([])
-  const [transferDebugSnapshot, setTransferDebugSnapshot] = useState<TransferDebugSnapshot | null>(null)
+  const [pourAttemptDirection, setPourAttemptDirection] = useState<'left' | 'right' | null>(null)
+  const [pastedFromDirection, setPastedFromDirection] = useState<'left' | 'right' | null>(null)
   const octaveTiltAnalyzerRef = useRef<OctaveChangeTiltAnalyzer | null>(null)
   const pourToCopyTiltAnalyzerRef = useRef<PourToCopyPasteTiltAnalyzer | null>(null)
   const groupCommandTimeoutRef = useRef<number | null>(null)
@@ -250,11 +234,36 @@ function App() {
     ? musicGroupState?.groups.find((group) => group.id === selfDeviceState.groupId) ?? null
     : null
   const isGrouped = !!selfDeviceState?.groupId && !!selfDeviceState.position && !!currentGroup
+  const isSnappedWithAnotherDevice = Boolean(
+    selfDeviceState?.groupId &&
+    selfDeviceState.position &&
+    musicGroupState &&
+    Object.entries(musicGroupState.devices).some(([deviceId, deviceState]) => {
+      if (deviceId === selfDeviceId) {
+        return false
+      }
+
+      if (deviceState.groupId !== selfDeviceState.groupId) {
+        return false
+      }
+
+      return true
+    })
+  )
   const playbackBpm = currentGroup?.sharedBpm ?? bpm
 
   useEffect(() => {
     selfDeviceIdRef.current = selfDeviceId
   }, [selfDeviceId])
+
+  useEffect(() => {
+    hasSnappedNeighborRef.current = isSnappedWithAnotherDevice
+    if (!isSnappedWithAnotherDevice) {
+      setPourAttemptDirection(null)
+      setPastedFromDirection(null)
+      clearPastedFromDirectionTimer()
+    }
+  }, [isSnappedWithAnotherDevice])
 
 
   // Update refs whenever the corresponding context state variables change
@@ -342,21 +351,11 @@ function App() {
     setGroupCommandPending(null)
   }
 
-  const clearTransferPulseTimers = (): void => {
-    transferPulseTimersRef.current.forEach((timerId) => window.clearTimeout(timerId))
-    transferPulseTimersRef.current = []
-  }
-
-  const triggerTransferPulse = (side: 'left' | 'right', flow: 'incoming' | 'outgoing'): void => {
-    const pulseId = `${Date.now()}-${Math.random()}`
-    setTransferPulses((prev) => [...prev, { id: pulseId, side, flow }])
-
-    const timerId = window.setTimeout(() => {
-      setTransferPulses((prev) => prev.filter((pulse) => pulse.id !== pulseId))
-      transferPulseTimersRef.current = transferPulseTimersRef.current.filter((id) => id !== timerId)
-    }, 700)
-
-    transferPulseTimersRef.current.push(timerId)
+  const clearPastedFromDirectionTimer = (): void => {
+    if (pastedFromDirectionTimerRef.current !== null) {
+      window.clearTimeout(pastedFromDirectionTimerRef.current)
+      pastedFromDirectionTimerRef.current = null
+    }
   }
 
   const convertTransferredNotes = (notes: NoteTransferData[]): Note[] => {
@@ -369,32 +368,12 @@ function App() {
       const incomingMelodic = convertTransferredNotes(payload.incomingMelodicComposition)
       // Incoming notes are applied last so they win in overlap conflicts.
       setComposition((previous) => applyNotesToComposition(previous, incomingMelodic))
-      setTransferDebugSnapshot({
-        role: 'receiver',
-        giverDeviceId: payload.giverDeviceId,
-        receiverDeviceId: payload.receiverDeviceId,
-        directionFromGiver: payload.directionFromGiver,
-        compositionType: payload.compositionType,
-        startedAt: payload.startedAt,
-        receivedAt: Date.now(),
-        mergedIncomingNotesCount: incomingMelodic.length,
-      })
       return
     }
 
     const incomingDrums = convertTransferredNotes(payload.incomingDrumsComposition)
     // Incoming notes are applied last so they win in overlap conflicts.
     setDrumsComposition((previous) => applyNotesToComposition(previous, incomingDrums))
-    setTransferDebugSnapshot({
-      role: 'receiver',
-      giverDeviceId: payload.giverDeviceId,
-      receiverDeviceId: payload.receiverDeviceId,
-      directionFromGiver: payload.directionFromGiver,
-      compositionType: payload.compositionType,
-      startedAt: payload.startedAt,
-      receivedAt: Date.now(),
-      mergedIncomingNotesCount: incomingDrums.length,
-    })
   }
 
   const markGroupCommandPending = (command: GroupControlCommand): void => {
@@ -774,7 +753,43 @@ function App() {
   };
 
   useEffect(() => {
+    const isWithinTolerance = (value: number | null, target: number, toleranceDeg: number): boolean => {
+      if (value === null) {
+        return false
+      }
+      return Math.abs(value - target) <= toleranceDeg
+    }
+
+    const getActivePourDirectionFromOrientation = (event: DeviceOrientationEvent): 'left' | 'right' | null => {
+      const isWithinGammaRange = isWithinTolerance(event.gamma, 0, 5)
+      if (!isWithinGammaRange) {
+        return null
+      }
+
+      if (isWithinTolerance(event.beta, 40, 15)) {
+        return 'right'
+      }
+
+      if (isWithinTolerance(event.beta, -40, 15)) {
+        return 'left'
+      }
+
+      return null
+    }
+
     const handleDeviceOrientation = (event: DeviceOrientationEvent) => {
+      if (!hasSnappedNeighborRef.current) {
+        setPourAttemptDirection(null)
+        octaveTiltAnalyzerRef.current?.addARecord(event)
+        setTiltDebugSnapshot(octaveTiltAnalyzerRef.current?.getDebugSnapshot() ?? null)
+        pourToCopyTiltAnalyzerRef.current?.addARecord(event)
+        setTiltDebugSnapshot(pourToCopyTiltAnalyzerRef.current?.getDebugSnapshot() ?? null)
+        return
+      }
+
+      const activePourDirection = getActivePourDirectionFromOrientation(event)
+      setPourAttemptDirection(activePourDirection)
+
       octaveTiltAnalyzerRef.current?.addARecord(event)
       setTiltDebugSnapshot(octaveTiltAnalyzerRef.current?.getDebugSnapshot() ?? null)
       pourToCopyTiltAnalyzerRef.current?.addARecord(event)
@@ -993,23 +1008,21 @@ function App() {
       }
 
       if (localDeviceId === payload.giverDeviceId) {
-        triggerTransferPulse(payload.directionFromGiver, 'outgoing')
-        setTransferDebugSnapshot({
-          role: 'giver',
-          giverDeviceId: payload.giverDeviceId,
-          receiverDeviceId: payload.receiverDeviceId,
-          directionFromGiver: payload.directionFromGiver,
-          compositionType: payload.compositionType,
-          startedAt: payload.startedAt,
-          receivedAt: Date.now(),
-          mergedIncomingNotesCount: 0,
-        })
         return
       }
 
       if (localDeviceId === payload.receiverDeviceId) {
-        const incomingSide = payload.directionFromGiver === 'right' ? 'left' : 'right'
-        triggerTransferPulse(incomingSide, 'incoming')
+        if (hasSnappedNeighborRef.current) {
+          clearPastedFromDirectionTimer()
+          const directionFromReceiver = payload.directionFromGiver === 'right' ? 'left' : 'right'
+          setPastedFromDirection(directionFromReceiver)
+
+          pastedFromDirectionTimerRef.current = window.setTimeout(() => {
+            setPastedFromDirection(null)
+            pastedFromDirectionTimerRef.current = null
+          }, 2000)
+        }
+
         mergeIncomingTransferredCompositions(payload)
       }
     }
@@ -1019,7 +1032,8 @@ function App() {
       if (!isConnected || !ServerSocketService.Connection.connected) {
         setSnapBorders([])
         setMusicGroupState(null)
-        setTransferDebugSnapshot(null)
+        setPourAttemptDirection(null)
+        setPastedFromDirection(null)
       }
     }
 
@@ -1095,7 +1109,7 @@ function App() {
       ServerSocketService.Connection.off('musicGroupReset', onMusicGroupReset)
       ServerSocketService.Connection.off('pourTransferResolved', onPourTransferResolved)
       ServerSocketService.Connection.off('connectedToServer', onConnectedToServer)
-      clearTransferPulseTimers()
+      clearPastedFromDirectionTimer()
       ServerSocketService.emit('destroy', undefined);
       containerRef.current!.onpointerdown = null;
       containerRef.current!.onpointermove = null;
@@ -1197,13 +1211,6 @@ function App() {
         />
       ))}
 
-      {transferPulses.map((pulse) => (
-        <div
-          key={pulse.id}
-          className={`pour-transfer-pulse ${pulse.side} ${pulse.flow}`}
-        />
-      ))}
-
       <ServerStatusOverlay enabled={SHOW_DEBUG_OVERLAY.server} connected={connectedToServer} />
 
       <GroupStatusOverlay
@@ -1225,32 +1232,51 @@ function App() {
         serverClockOffsetMs={groupPlaybackDebugSnapshot.serverClockOffsetMs}
       />
 
-      {transferDebugSnapshot && (
+      {isSnappedWithAnotherDevice && pourAttemptDirection && (
         <div
           style={{
             position: 'absolute',
-            left: '8px',
-            bottom: '8px',
-            zIndex: 45,
-            background: 'rgba(6, 10, 18, 0.88)',
+            top: '12px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 60,
+            background: 'rgba(8, 12, 20, 0.86)',
             color: '#fff',
-            padding: '8px 10px',
-            borderRadius: '6px',
+            borderRadius: '999px',
+            border: '1px solid rgba(255, 255, 255, 0.45)',
+            padding: '6px 12px',
             fontFamily: 'monospace',
             fontSize: '11px',
-            lineHeight: 1.35,
+            lineHeight: 1,
             pointerEvents: 'none',
           }}
         >
-          <div style={{ fontWeight: 700, marginBottom: '4px' }}>pour transfer</div>
-          <div>role: {transferDebugSnapshot.role}</div>
-          <div>mode: {transferDebugSnapshot.compositionType}</div>
-          <div>dir: {transferDebugSnapshot.directionFromGiver}</div>
-          <div>giver: {transferDebugSnapshot.giverDeviceId}</div>
-          <div>receiver: {transferDebugSnapshot.receiverDeviceId}</div>
-          <div>merged notes: {transferDebugSnapshot.mergedIncomingNotesCount}</div>
-          <div>gesture at: {new Date(transferDebugSnapshot.startedAt).toLocaleTimeString()}</div>
-          <div>resolved at: {new Date(transferDebugSnapshot.receivedAt).toLocaleTimeString()}</div>
+          pouring to the {pourAttemptDirection}
+        </div>
+      )}
+
+      {isSnappedWithAnotherDevice && pastedFromDirection && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            zIndex: 60,
+            background: 'rgba(10, 16, 28, 0.9)',
+            color: '#fff',
+            borderRadius: '10px',
+            border: '1px solid rgba(255, 255, 255, 0.35)',
+            padding: '14px 22px',
+            fontFamily: 'monospace',
+            fontSize: 'clamp(20px, 3.2vw, 40px)',
+            fontWeight: 700,
+            textAlign: 'center',
+            lineHeight: 1,
+            pointerEvents: 'none',
+          }}
+        >
+          composition pasted from the {pastedFromDirection}
         </div>
       )}
 
