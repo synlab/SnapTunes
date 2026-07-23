@@ -134,6 +134,7 @@ export function NoteSpace({ progressRef, playbackState }: NoteSpaceProps) {
   const clearSignalRef = useRef(clearSignal)
   const undoRef = useRef<boolean>(shouldUndo)
   const instrumentThemeRef = useRef<InstrumentTheme>(activeTheme)
+  const compositionStateRef = useRef<Note[]>(composition)
 
   //--- Effect hooks to update refs ---//
   useEffect(() => {
@@ -151,6 +152,10 @@ export function NoteSpace({ progressRef, playbackState }: NoteSpaceProps) {
   useEffect(() => {
     instrumentThemeRef.current = activeTheme
   }, [activeTheme])
+
+  useEffect(() => {
+    compositionStateRef.current = composition
+  }, [composition])
 
   useEffect(() => {
     playbackStateRef.current = playbackState
@@ -598,6 +603,19 @@ export function NoteSpace({ progressRef, playbackState }: NoteSpaceProps) {
         // Sync selection from ref into local sketch variable each frame.
         // Using a ref avoids remounting the sketch when selection changes.
         sketchSelectedNote = selectedNoteRef.current
+
+        const latestCompositionFromContext = compositionStateRef.current
+        if (latestCompositionFromContext !== compositionTemp) {
+          // Accept out-of-band composition updates (e.g. socket transfer merges)
+          // so the sketch reflects shared-state changes immediately.
+          compositionTemp = latestCompositionFromContext
+          if (sketchSelectedNote) {
+            sketchSelectedNote = null
+            selectedNoteRef.current = null
+          }
+          clearDragAndDropState()
+          drawGesture = null
+        }
 
         const latestClearSignal = clearSignalRef.current
         if (latestClearSignal.seq !== lastHandledClearSeq) {

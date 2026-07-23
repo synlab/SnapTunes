@@ -12,7 +12,7 @@ export interface CompletedInteraction {
 }
 
 export interface TiltAnalyzerMachineDebugSnapshot {
-    type: 'octaveChangeUp' | 'octaveChangeDown'
+    type: 'octaveChangeUp' | 'octaveChangeDown' | 'pourToCopyTowardsLeft' | 'pourToCopyTowardsRight'
     state: 'OUT_OF_SEQUENCE' | 'IDLE' | 'TILTING' | 'HOLDING' | 'AWAITING_RETURN'
     holdEnteredAt: number | null
     returnDeadline: number | null
@@ -43,11 +43,6 @@ export abstract class TiltAnalyzer {
 
         this.latestRecord = normalizedRecord
         this.history.push(normalizedRecord)
-
-        // Keep the working buffer small so a gesture only evaluates recent samples.
-        // if (this.history.length > 32) {
-        //   this.history.shift()
-        // }
 
         this.manageRecord()
     }
@@ -90,7 +85,7 @@ export abstract class TiltAnalyzer {
 type GestureState = | 'OUT_OF_SEQUENCE' | 'IDLE' | 'TILTING' | 'HOLDING' | 'AWAITING_RETURN'
 
 export interface GestureMachine {
-    type: 'octaveChangeUp' | 'octaveChangeDown'
+    type: 'octaveChangeUp' | 'octaveChangeDown' | 'pourToCopyTowardsLeft' | 'pourToCopyTowardsRight'
     state: GestureState
     holdEnteredAt: number | null
     returnDeadline: number | null

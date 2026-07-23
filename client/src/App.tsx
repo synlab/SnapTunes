@@ -27,6 +27,7 @@ import {
   Note,
 } from './types'
 import { generateRequestId, getCompositionDurationMs, getCompositionDurationSec } from './app/playbackUtils'
+import { applyNotesToComposition } from './utils/noteProcessor'
 import { useSamplerTransport } from './app/useSamplerTransport'
 import * as Tone from 'tone';
 import { MovementManagerDeviceEvent } from 'simsnap-core/src/entities/VirtualRoom/MovementManager'
@@ -69,6 +70,47 @@ interface GroupPlaybackDebugSnapshot {
   serverClockOffsetMs: number
 }
 
+interface NoteTransferData {
+  pitch: string
+  startTime: number
+  duration: number
+}
+
+interface PourInteractionEmitPayload {
+  type: 'left' | 'right'
+  startedAt: number
+  compositionType: 'melodic' | 'drums'
+  melodicComposition: NoteTransferData[]
+  drumsComposition: NoteTransferData[]
+}
+
+interface PourTransferResolvedPayload {
+  giverDeviceId: string
+  receiverDeviceId: string
+  directionFromGiver: 'left' | 'right'
+  startedAt: number
+  compositionType: 'melodic' | 'drums'
+  incomingMelodicComposition: NoteTransferData[]
+  incomingDrumsComposition: NoteTransferData[]
+}
+
+interface TransferPulse {
+  id: string
+  side: 'left' | 'right'
+  flow: 'incoming' | 'outgoing'
+}
+
+interface TransferDebugSnapshot {
+  role: 'giver' | 'receiver'
+  giverDeviceId: string
+  receiverDeviceId: string
+  directionFromGiver: 'left' | 'right'
+  compositionType: 'melodic' | 'drums'
+  startedAt: number
+  receivedAt: number
+  mergedIncomingNotesCount: number
+}
+
 
 // Send a clock sync request every 5 seconds to keep the local clock offset estimate up to date
 const CLOCK_SYNC_INTERVAL_MS = 5000
@@ -83,6 +125,8 @@ function App() {
   const { instrument } = ctx.useInstrument()
   const { playback } = ctx.usePlayback()
   const { setPlayback } = ctx.useUpdatePlayback()
+  const { setComposition } = ctx.useUpdateComposition()
+  const { setDrumsComposition } = ctx.useUpdateDrumsComposition()
   const { bpm } = ctx.useBPM()
   const { composition } = ctx.useComposition()
   const { drumsComposition } = ctx.useDrumsComposition()
@@ -114,6 +158,8 @@ function App() {
   const pendingGroupedStartTimerRef = useRef<number | null>(null)
   const pendingGroupedStartTokenRef = useRef<number | null>(null)
   const activeGroupedScheduleRef = useRef<ActiveGroupedSchedule | null>(null)
+  const selfDeviceIdRef = useRef<string | null>(null)
+  const transferPulseTimersRef = useRef<number[]>([])
 
 
   const [snapBorders, setSnapBorders] = useState<SnapBorder[]>([])
@@ -130,6 +176,8 @@ function App() {
     serverClockOffsetMs: 0,
   })
   const [tiltDebugSnapshot, setTiltDebugSnapshot] = useState<ReturnType<OctaveChangeTiltAnalyzer['getDebugSnapshot']> | null>(null)
+  const [transferPulses, setTransferPulses] = useState<TransferPulse[]>([])
+  const [transferDebugSnapshot, setTransferDebugSnapshot] = useState<TransferDebugSnapshot | null>(null)
   const octaveTiltAnalyzerRef = useRef<OctaveChangeTiltAnalyzer | null>(null)
   const pourToCopyTiltAnalyzerRef = useRef<PourToCopyPasteTiltAnalyzer | null>(null)
   const groupCommandTimeoutRef = useRef<number | null>(null)
@@ -162,12 +210,31 @@ function App() {
 
   //Pour to copy tilt analyzer setup
   useEffect(() => {
+    const serializeNotes = (notes: Note[]): NoteTransferData[] => {
+      return notes.map((note) => ({
+        pitch: note.pitch,
+        startTime: note.startTime,
+        duration: note.duration,
+      }))
+    }
+
+    const emitPourInteraction = (type: 'left' | 'right', startedAt: number): void => {
+      const compositionType = instrumentRef.current === Instrument.Drums ? 'drums' : 'melodic'
+      const payload: PourInteractionEmitPayload = {
+        type,
+        startedAt,
+        compositionType,
+        melodicComposition: compositionType === 'melodic' ? serializeNotes(compositionRef.current) : [],
+        drumsComposition: compositionType === 'drums' ? serializeNotes(drumsCompositionRef.current) : [],
+      }
+      ServerSocketService.Connection.emit('pourInteraction', payload)
+    }
 
     pourToCopyTiltAnalyzerRef.current = new PourToCopyPasteTiltAnalyzer((interaction: CompletedInteraction) => {
-      if (interaction.type === 'pourToCopyTowardsLeft') {
-        //Fire copy paste to left to the server
-      } else if (interaction.type === 'pourToCopyTowardsRight') {
-        //Fire copy paste right  to the server
+      if (interaction.type === 'pourLeft') {
+        emitPourInteraction('left', interaction.startedAt)
+      } else if (interaction.type === 'pourRight') {
+        emitPourInteraction('right', interaction.startedAt)
       }
     })
     
@@ -184,6 +251,10 @@ function App() {
     : null
   const isGrouped = !!selfDeviceState?.groupId && !!selfDeviceState.position && !!currentGroup
   const playbackBpm = currentGroup?.sharedBpm ?? bpm
+
+  useEffect(() => {
+    selfDeviceIdRef.current = selfDeviceId
+  }, [selfDeviceId])
 
 
   // Update refs whenever the corresponding context state variables change
@@ -269,6 +340,61 @@ function App() {
 
     groupCommandPendingRef.current = null
     setGroupCommandPending(null)
+  }
+
+  const clearTransferPulseTimers = (): void => {
+    transferPulseTimersRef.current.forEach((timerId) => window.clearTimeout(timerId))
+    transferPulseTimersRef.current = []
+  }
+
+  const triggerTransferPulse = (side: 'left' | 'right', flow: 'incoming' | 'outgoing'): void => {
+    const pulseId = `${Date.now()}-${Math.random()}`
+    setTransferPulses((prev) => [...prev, { id: pulseId, side, flow }])
+
+    const timerId = window.setTimeout(() => {
+      setTransferPulses((prev) => prev.filter((pulse) => pulse.id !== pulseId))
+      transferPulseTimersRef.current = transferPulseTimersRef.current.filter((id) => id !== timerId)
+    }, 700)
+
+    transferPulseTimersRef.current.push(timerId)
+  }
+
+  const convertTransferredNotes = (notes: NoteTransferData[]): Note[] => {
+    return notes.map((note) => new Note(note.pitch as Note['pitch'], note.startTime, note.duration))
+  }
+
+  const mergeIncomingTransferredCompositions = (payload: PourTransferResolvedPayload): void => {
+    // Receiver only merges the composition family that participated in the transfer.
+    if (payload.compositionType === 'melodic') {
+      const incomingMelodic = convertTransferredNotes(payload.incomingMelodicComposition)
+      // Incoming notes are applied last so they win in overlap conflicts.
+      setComposition((previous) => applyNotesToComposition(previous, incomingMelodic))
+      setTransferDebugSnapshot({
+        role: 'receiver',
+        giverDeviceId: payload.giverDeviceId,
+        receiverDeviceId: payload.receiverDeviceId,
+        directionFromGiver: payload.directionFromGiver,
+        compositionType: payload.compositionType,
+        startedAt: payload.startedAt,
+        receivedAt: Date.now(),
+        mergedIncomingNotesCount: incomingMelodic.length,
+      })
+      return
+    }
+
+    const incomingDrums = convertTransferredNotes(payload.incomingDrumsComposition)
+    // Incoming notes are applied last so they win in overlap conflicts.
+    setDrumsComposition((previous) => applyNotesToComposition(previous, incomingDrums))
+    setTransferDebugSnapshot({
+      role: 'receiver',
+      giverDeviceId: payload.giverDeviceId,
+      receiverDeviceId: payload.receiverDeviceId,
+      directionFromGiver: payload.directionFromGiver,
+      compositionType: payload.compositionType,
+      startedAt: payload.startedAt,
+      receivedAt: Date.now(),
+      mergedIncomingNotesCount: incomingDrums.length,
+    })
   }
 
   const markGroupCommandPending = (command: GroupControlCommand): void => {
@@ -860,11 +986,40 @@ function App() {
       handleGroupedReset(payload)
     }
 
+    const onPourTransferResolved = (payload: PourTransferResolvedPayload): void => {
+      const localDeviceId = selfDeviceIdRef.current
+      if (!localDeviceId) {
+        return
+      }
+
+      if (localDeviceId === payload.giverDeviceId) {
+        triggerTransferPulse(payload.directionFromGiver, 'outgoing')
+        setTransferDebugSnapshot({
+          role: 'giver',
+          giverDeviceId: payload.giverDeviceId,
+          receiverDeviceId: payload.receiverDeviceId,
+          directionFromGiver: payload.directionFromGiver,
+          compositionType: payload.compositionType,
+          startedAt: payload.startedAt,
+          receivedAt: Date.now(),
+          mergedIncomingNotesCount: 0,
+        })
+        return
+      }
+
+      if (localDeviceId === payload.receiverDeviceId) {
+        const incomingSide = payload.directionFromGiver === 'right' ? 'left' : 'right'
+        triggerTransferPulse(incomingSide, 'incoming')
+        mergeIncomingTransferredCompositions(payload)
+      }
+    }
+
     const onConnectedToServer = (isConnected: boolean): void => {
       setConnectedToServer(isConnected && ServerSocketService.Connection.connected)
       if (!isConnected || !ServerSocketService.Connection.connected) {
         setSnapBorders([])
         setMusicGroupState(null)
+        setTransferDebugSnapshot(null)
       }
     }
 
@@ -888,6 +1043,7 @@ function App() {
     ServerSocketService.Connection.on('musicGroupPaused', onMusicGroupPaused)
     ServerSocketService.Connection.on('musicGroupCancelScheduledStart', onMusicGroupCancelScheduledStart)
     ServerSocketService.Connection.on('musicGroupReset', onMusicGroupReset)
+    ServerSocketService.Connection.on('pourTransferResolved', onPourTransferResolved)
     ServerSocketService.Connection.on('connectedToServer', onConnectedToServer)
 
     syncConnectionState()
@@ -937,7 +1093,9 @@ function App() {
       ServerSocketService.Connection.off('musicGroupPaused', onMusicGroupPaused)
       ServerSocketService.Connection.off('musicGroupCancelScheduledStart', onMusicGroupCancelScheduledStart)
       ServerSocketService.Connection.off('musicGroupReset', onMusicGroupReset)
+      ServerSocketService.Connection.off('pourTransferResolved', onPourTransferResolved)
       ServerSocketService.Connection.off('connectedToServer', onConnectedToServer)
+      clearTransferPulseTimers()
       ServerSocketService.emit('destroy', undefined);
       containerRef.current!.onpointerdown = null;
       containerRef.current!.onpointermove = null;
@@ -1039,6 +1197,13 @@ function App() {
         />
       ))}
 
+      {transferPulses.map((pulse) => (
+        <div
+          key={pulse.id}
+          className={`pour-transfer-pulse ${pulse.side} ${pulse.flow}`}
+        />
+      ))}
+
       <ServerStatusOverlay enabled={SHOW_DEBUG_OVERLAY.server} connected={connectedToServer} />
 
       <GroupStatusOverlay
@@ -1059,6 +1224,35 @@ function App() {
         scheduleToken={groupPlaybackDebugSnapshot.scheduleToken}
         serverClockOffsetMs={groupPlaybackDebugSnapshot.serverClockOffsetMs}
       />
+
+      {transferDebugSnapshot && (
+        <div
+          style={{
+            position: 'absolute',
+            left: '8px',
+            bottom: '8px',
+            zIndex: 45,
+            background: 'rgba(6, 10, 18, 0.88)',
+            color: '#fff',
+            padding: '8px 10px',
+            borderRadius: '6px',
+            fontFamily: 'monospace',
+            fontSize: '11px',
+            lineHeight: 1.35,
+            pointerEvents: 'none',
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: '4px' }}>pour transfer</div>
+          <div>role: {transferDebugSnapshot.role}</div>
+          <div>mode: {transferDebugSnapshot.compositionType}</div>
+          <div>dir: {transferDebugSnapshot.directionFromGiver}</div>
+          <div>giver: {transferDebugSnapshot.giverDeviceId}</div>
+          <div>receiver: {transferDebugSnapshot.receiverDeviceId}</div>
+          <div>merged notes: {transferDebugSnapshot.mergedIncomingNotesCount}</div>
+          <div>gesture at: {new Date(transferDebugSnapshot.startedAt).toLocaleTimeString()}</div>
+          <div>resolved at: {new Date(transferDebugSnapshot.receivedAt).toLocaleTimeString()}</div>
+        </div>
+      )}
 
       {SHOW_DEBUG_OVERLAY.tilt && tiltDebugSnapshot && (
         <div

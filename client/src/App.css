@@ -7,3 +7,57 @@
 body {
   overflow: hidden;
 }
+
+@keyframes pourTransferPulse {
+  0% {
+    opacity: 0;
+    transform: scaleX(0.35);
+  }
+  20% {
+    opacity: 0.95;
+    transform: scaleX(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scaleX(1.15);
+  }
+}
+
+.pour-transfer-pulse {
+  position: absolute;
+  top: 22%;
+  height: 56%;
+  width: 22px;
+  border-radius: 12px;
+  pointer-events: none;
+  z-index: 30;
+  animation: pourTransferPulse 700ms ease-out forwards;
+}
+
+.pour-transfer-pulse.left {
+  left: 2px;
+}
+
+.pour-transfer-pulse.right {
+  right: 2px;
+}
+
+.pour-transfer-pulse.left.outgoing {
+  background: linear-gradient(90deg, rgba(255, 184, 43, 0.96), rgba(255, 184, 43, 0.08));
+  box-shadow: 0 0 14px rgba(255, 184, 43, 0.7);
+}
+
+.pour-transfer-pulse.left.incoming {
+  background: linear-gradient(90deg, rgba(91, 203, 255, 0.08), rgba(91, 203, 255, 0.96));
+  box-shadow: 0 0 14px rgba(91, 203, 255, 0.7);
+}
+
+.pour-transfer-pulse.right.outgoing {
+  background: linear-gradient(270deg, rgba(255, 184, 43, 0.96), rgba(255, 184, 43, 0.08));
+  box-shadow: 0 0 14px rgba(255, 184, 43, 0.7);
+}
+
+.pour-transfer-pulse.right.incoming {
+  background: linear-gradient(270deg, rgba(91, 203, 255, 0.08), rgba(91, 203, 255, 0.96));
+  box-shadow: 0 0 14px rgba(91, 203, 255, 0.7);
+}

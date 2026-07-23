@@ -32,6 +32,50 @@ interface GroupPlaybackSession {
     lastScheduledStartTimeMs: number | null;
 }
 
+interface NoteTransferData {
+    pitch: string;
+    startTime: number;
+    duration: number;
+}
+
+interface PourInteractionPayload {
+    type: 'left' | 'right';
+    startedAt: number;
+    compositionType: 'melodic' | 'drums';
+    melodicComposition: NoteTransferData[];
+    drumsComposition: NoteTransferData[];
+}
+
+interface PourTransferResolvedPayload {
+    giverDeviceId: string;
+    receiverDeviceId: string;
+    directionFromGiver: 'left' | 'right';
+    startedAt: number;
+    compositionType: 'melodic' | 'drums';
+    incomingMelodicComposition: NoteTransferData[];
+    incomingDrumsComposition: NoteTransferData[];
+}
+
+interface PendingPourIntent {
+    deviceId: string;
+    groupId: string;
+    direction: 'left' | 'right';
+    startedAt: number;
+    receivedAt: number;
+    positionCol: number;
+    positionRow: number;
+    compositionType: 'melodic' | 'drums';
+    melodicComposition: NoteTransferData[];
+    drumsComposition: NoteTransferData[];
+}
+
+interface PairExchangeLock {
+    firstDeviceId: string;
+    secondDeviceId: string;
+    compositionType: 'melodic' | 'drums';
+    startedAtByDeviceId: Record<string, number>;
+}
+
 /*
 Shared composition lifecycle (server authoritative):
 1. Snap/unsnap/remove-device events mutate only the underlying pair relations on devices.
@@ -48,7 +92,10 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
     // Shared playback state is tracked separately from group topology so the
     // existing snap/unsnap reconstruction flow stays unchanged.
     private readonly groupPlaybackSessions: Map<string, GroupPlaybackSession> = new Map<string, GroupPlaybackSession>();
+    private readonly pendingPourIntentsByDeviceId: Map<string, PendingPourIntent> = new Map<string, PendingPourIntent>();
+    private readonly pairExchangeLocksByKey: Map<string, PairExchangeLock> = new Map<string, PairExchangeLock>();
     private readonly scheduleBufferMs = 200;
+    private readonly maxPourIntentAgeMs = 4000;
 
     constructor(ioServer: Server, override virtualRoom: VirtualRoom = new VirtualRoom()) {
         super('', ioServer, virtualRoom, (clientSocket) => new MusicClientSocketService(clientSocket, virtualRoom));
@@ -86,6 +133,8 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
 
     clientQuit(client: MusicClientSocketService): void {
         this.clients = this.clients.filter((currentClient) => currentClient.clientSocket.id !== client.clientSocket.id);
+        this.pendingPourIntentsByDeviceId.delete(client.device.id.value);
+        this.pruneExchangeLocksForDevice(client.device.id.value);
         this.emitDeviceCount();
         this.emitMusicGroupState();
     }
@@ -127,9 +176,87 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         client.clientSocket.on('musicGroupColumnFinished', (payload: MusicGroupColumnFinishedPayload) => {
             this.handleMusicGroupColumnFinished(client, payload);
         });
+        client.clientSocket.on('pourInteraction', (payload: PourInteractionPayload) => {
+            this.handlePourInteraction(client, payload);
+        });
+    }
+
+    private handlePourInteraction(client: MusicClientSocketService, payload: PourInteractionPayload): void {
+        if (
+            (payload.type !== 'left' && payload.type !== 'right') ||
+            (payload.compositionType !== 'melodic' && payload.compositionType !== 'drums') ||
+            !Number.isFinite(payload.startedAt) ||
+            !this.isValidNoteTransferDataArray(payload.melodicComposition) ||
+            !this.isValidNoteTransferDataArray(payload.drumsComposition)
+        ) {
+            return;
+        }
+
+        const sourceDevice = client.device as MusicDevice;
+        const sourceGroup = sourceDevice.musicGroup;
+        const sourcePosition = sourceDevice.groupGridPosition;
+        if (!sourceGroup || !sourcePosition) {
+            return;
+        }
+
+        const nowMs = Date.now();
+        this.pruneStalePourIntents(nowMs);
+
+        const incomingIntent: PendingPourIntent = {
+            deviceId: sourceDevice.id.value,
+            groupId: sourceGroup.id,
+            direction: payload.type,
+            startedAt: payload.startedAt,
+            receivedAt: nowMs,
+            positionCol: sourcePosition.col,
+            positionRow: sourcePosition.row,
+            compositionType: payload.compositionType,
+            melodicComposition: payload.melodicComposition,
+            drumsComposition: payload.drumsComposition,
+        };
+
+        const giverIntent = this.findMatchingPendingGiverIntent(incomingIntent, sourceGroup);
+        if (!giverIntent) {
+            // Keep only the latest intent per device so stale repeats do not keep matching forever.
+            this.pendingPourIntentsByDeviceId.set(incomingIntent.deviceId, incomingIntent);
+            return;
+        }
+
+        // First server-detected intent is the giver by definition.
+        const receiverIntent = incomingIntent;
+
+        const exchangeLockKey = this.getExchangeLockKey(
+            giverIntent.deviceId,
+            receiverIntent.deviceId,
+            giverIntent.compositionType
+        );
+
+        if (this.isExchangeStillLocked(exchangeLockKey, giverIntent, receiverIntent)) {
+            this.pendingPourIntentsByDeviceId.delete(giverIntent.deviceId);
+            this.pendingPourIntentsByDeviceId.delete(receiverIntent.deviceId);
+            return;
+        }
+
+        this.pendingPourIntentsByDeviceId.delete(giverIntent.deviceId);
+        this.pendingPourIntentsByDeviceId.delete(receiverIntent.deviceId);
+
+        const transferPayload: PourTransferResolvedPayload = {
+            giverDeviceId: giverIntent.deviceId,
+            receiverDeviceId: receiverIntent.deviceId,
+            directionFromGiver: giverIntent.direction,
+            startedAt: giverIntent.startedAt,
+            compositionType: giverIntent.compositionType,
+            incomingMelodicComposition: giverIntent.melodicComposition,
+            incomingDrumsComposition: giverIntent.drumsComposition,
+        };
+
+        this.upsertExchangeLock(exchangeLockKey, giverIntent, receiverIntent);
+        this.emitToGroup(sourceGroup, 'pourTransferResolved', transferPayload);
     }
 
     handleDestroy(): void {
+        this.pendingPourIntentsByDeviceId.clear();
+        this.pairExchangeLocksByKey.clear();
         this.virtualRoom.emit('destroy', undefined);
         this.emit('destroy', undefined);
     }
@@ -137,6 +264,9 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
     handleSnapDevices({ event1, event2 }: SnapDevicesEvent): void {
         const device1 = event1.device as MusicDevice;
         const device2 = event2.device as MusicDevice;
+
+        // Topology changes invalidate pending two-device pour handshakes.
+        this.clearPourCoordinationState();
 
         // Joining two devices can merge or reshape groups, so shared playback is
         // interrupted before the topology mutation is applied.
@@ -177,6 +307,9 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         const device1 = event1.device as MusicDevice;
         const device2 = event2.device as MusicDevice;
 
+        // Topology changes invalidate pending two-device pour handshakes.
+        this.clearPourCoordinationState();
+
         // Topology changes must stop shared playback before the group graph is rebuilt.
         this.stopPlaybackForAffectedGroups(device1.musicGroup, device2.musicGroup);
 
@@ -199,6 +332,9 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         if (!musicDevice || !musicDevice.id) {
             return;
         }
+
+        this.pendingPourIntentsByDeviceId.delete(musicDevice.id.value);
+        this.pruneExchangeLocksForDevice(musicDevice.id.value);
 
         // Removing a device invalidates the active composition layout, so shared
         // playback is stopped before the room rebuilds group membership.
@@ -589,6 +725,140 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         group.getMembers().forEach((device) => {
             device.client.clientSocket.emit(eventName, payload);
         });
+    }
+
+    private clearPourCoordinationState(): void {
+        this.pendingPourIntentsByDeviceId.clear();
+        this.pairExchangeLocksByKey.clear();
+    }
+
+    private pruneExchangeLocksForDevice(deviceId: string): void {
+        Array.from(this.pairExchangeLocksByKey.entries()).forEach(([key, lock]) => {
+            if (lock.firstDeviceId === deviceId || lock.secondDeviceId === deviceId) {
+                this.pairExchangeLocksByKey.delete(key);
+            }
+        });
+    }
+
+    private getExchangeLockKey(
+        firstDeviceId: string,
+        secondDeviceId: string,
+        compositionType: 'melodic' | 'drums'
+    ): string {
+        return `${this.getPairKey(firstDeviceId, secondDeviceId)}|${compositionType}`;
+    }
+
+    private isExchangeStillLocked(
+        exchangeLockKey: string,
+        giverIntent: PendingPourIntent,
+        receiverIntent: PendingPourIntent
+    ): boolean {
+        const lock = this.pairExchangeLocksByKey.get(exchangeLockKey);
+        if (!lock) {
+            return false;
+        }
+
+        const giverStartedAt = lock.startedAtByDeviceId[giverIntent.deviceId];
+        const receiverStartedAt = lock.startedAtByDeviceId[receiverIntent.deviceId];
+
+        return giverStartedAt === giverIntent.startedAt && receiverStartedAt === receiverIntent.startedAt;
+    }
+
+    private upsertExchangeLock(
+        exchangeLockKey: string,
+        giverIntent: PendingPourIntent,
+        receiverIntent: PendingPourIntent
+    ): void {
+        this.pairExchangeLocksByKey.set(exchangeLockKey, {
+            firstDeviceId: giverIntent.deviceId,
+            secondDeviceId: receiverIntent.deviceId,
+            compositionType: giverIntent.compositionType,
+            startedAtByDeviceId: {
+                [giverIntent.deviceId]: giverIntent.startedAt,
+                [receiverIntent.deviceId]: receiverIntent.startedAt,
+            },
+        });
+    }
+
+    private isValidNoteTransferDataArray(notes: unknown): notes is NoteTransferData[] {
+        if (!Array.isArray(notes)) {
+            return false;
+        }
+
+        return notes.every((note) => {
+            if (!note || typeof note !== 'object') {
+                return false;
+            }
+
+            const maybeNote = note as Partial<NoteTransferData>;
+            return (
+                typeof maybeNote.pitch === 'string' &&
+                Number.isFinite(maybeNote.startTime) &&
+                Number.isFinite(maybeNote.duration)
+            );
+        });
+    }
+
+    private pruneStalePourIntents(nowMs: number): void {
+        Array.from(this.pendingPourIntentsByDeviceId.entries()).forEach(([deviceId, intent]) => {
+            if (nowMs - intent.receivedAt > this.maxPourIntentAgeMs) {
+                this.pendingPourIntentsByDeviceId.delete(deviceId);
+            }
+        });
+    }
+
+    private findMatchingPendingGiverIntent(
+        receiverIntent: PendingPourIntent,
+        group: MusicGroup
+    ): PendingPourIntent | null {
+        let bestMatch: PendingPourIntent | null = null;
+
+        this.pendingPourIntentsByDeviceId.forEach((candidateIntent) => {
+            if (candidateIntent.groupId !== receiverIntent.groupId) {
+                return;
+            }
+
+            if (!this.isCoherentHorizontalPair(candidateIntent, receiverIntent, group)) {
+                return;
+            }
+
+            if (!bestMatch || candidateIntent.receivedAt < bestMatch.receivedAt) {
+                bestMatch = candidateIntent;
+            }
+        });
+
+        return bestMatch;
+    }
+
+    private isCoherentHorizontalPair(
+        giverIntent: PendingPourIntent,
+        receiverIntent: PendingPourIntent,
+        group: MusicGroup
+    ): boolean {
+        if (giverIntent.compositionType !== receiverIntent.compositionType) {
+            return false;
+        }
+
+        if (giverIntent.direction === receiverIntent.direction) {
+            return false;
+        }
+
+        const expectedReceiverCol = giverIntent.positionCol + (giverIntent.direction === 'right' ? 1 : -1);
+        const expectedReceiverRow = giverIntent.positionRow;
+
+        if (
+            receiverIntent.positionCol !== expectedReceiverCol ||
+            receiverIntent.positionRow !== expectedReceiverRow
+        ) {
+            return false;
+        }
+
+        const giverNeighbors = group.getNeighbors(giverIntent.deviceId);
+        const receiverNeighbors = group.getNeighbors(receiverIntent.deviceId);
+        const expectedReceiverId = giverNeighbors[giverIntent.direction === 'right' ? Position.right : Position.left];
+        const expectedGiverId = receiverNeighbors[giverIntent.direction === 'right' ? Position.left : Position.right];
+
+        return expectedReceiverId === receiverIntent.deviceId && expectedGiverId === giverIntent.deviceId;
     }
 
     private prunePlaybackSessions(): void {
