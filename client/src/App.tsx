@@ -3,9 +3,7 @@ import { TopBar } from './components/topbar/TopBar'
 import { NoteSpace } from './components/notespace/NoteSpace'
 import { DrumSpace } from './components/notespace/DrumSpace'
 import { SHOW_DEBUG_OVERLAY } from './app/debugHandler'
-import { ServerStatusOverlay } from './components/overlays/ServerStatusOverlay'
-import { GroupStatusOverlay } from './components/overlays/GroupStatusOverlay'
-import { GroupDebugOverlay } from './components/overlays/GroupDebugOverlay'
+import { DebugOverlay } from './components/overlays/DebugOverlay'
 import * as ctx from './contexts/snaptunestatecontext'
 import * as simsnapctx from './contexts/simsnapcontext'
 import { ServerSocketService } from 'simsnap-core'
@@ -34,6 +32,7 @@ import { MovementManagerDeviceEvent } from 'simsnap-core/src/entities/VirtualRoo
 import { type CompletedInteraction } from './app/services/TiltAnalyzerService'
 import { OctaveChangeTiltAnalyzer } from './app/services/OctaveChangeTiltAnalyzer'
 import { PourToCopyPasteTiltAnalyzer } from './app/services/PourToCopyPasteTiltAnalyzer'
+import { OVERLAY_BASE_STYLE, OVERLAY_DEBUG_PANEL_STYLE, OVERLAY_MONOSPACE_TEXT_STYLE } from './components/overlays/overlayStyles'
 
 
 //For visualizing snap borders between devices
@@ -1204,25 +1203,40 @@ function App() {
         />
       ))}
 
-      <ServerStatusOverlay enabled={SHOW_DEBUG_OVERLAY.server} connected={connectedToServer} />
-
-      <GroupStatusOverlay
-        enabled={SHOW_DEBUG_OVERLAY.group}
-        groupLabel={selfDeviceState?.groupId ?? 'none'}
-        positionLabel={
-          selfDeviceState?.position
-            ? `[col: ${selfDeviceState.position.col}, row: ${selfDeviceState.position.row}]`
-            : 'n/a'
-        }
-        bpmLabel={currentGroup?.sharedBpm ?? bpm}
+      <DebugOverlay
+        enabled={SHOW_DEBUG_OVERLAY.server}
+        title={`${connectedToServer ? '🟢' : '🔴'} server: ${connectedToServer ? 'connected' : 'disconnected'}`}
+        values={new Map<string, any>()}
+        style={{ right: '8px', top: '8px', zIndex: 50 }}
       />
 
-      <GroupDebugOverlay
+
+      <DebugOverlay
+        enabled={SHOW_DEBUG_OVERLAY.group}
+        title="group status"
+        values={new Map<string, any>([
+          ['group', selfDeviceState?.groupId ?? 'none'],
+          [
+            'position',
+            selfDeviceState?.position
+              ? `[col: ${selfDeviceState.position.col}, row: ${selfDeviceState.position.row}]`
+              : 'n/a',
+          ],
+          ['bpm', currentGroup?.sharedBpm ?? bpm],
+        ])}
+        style={{ left: '8px', top: '8px', zIndex: 50 }}
+      />
+
+      <DebugOverlay
         enabled={SHOW_DEBUG_OVERLAY.playback}
-        groupId={groupPlaybackDebugSnapshot.groupId}
-        columnIndex={groupPlaybackDebugSnapshot.columnIndex}
-        scheduleToken={groupPlaybackDebugSnapshot.scheduleToken}
-        serverClockOffsetMs={groupPlaybackDebugSnapshot.serverClockOffsetMs}
+        title="group playback"
+        values={new Map<string, any>([
+          ['group', groupPlaybackDebugSnapshot.groupId ?? 'none'],
+          ['column', groupPlaybackDebugSnapshot.columnIndex ?? 'n/a'],
+          ['token', groupPlaybackDebugSnapshot.scheduleToken ?? 'n/a'],
+          ['clock offset', `${Math.round(groupPlaybackDebugSnapshot.serverClockOffsetMs)} ms`],
+        ])}
+        style={{ right: '8px', bottom: '8px', zIndex: 50 }}
       />
 
       {isSnappedWithAnotherDevice && pourAttemptDirection && (
@@ -1274,32 +1288,16 @@ function App() {
       )}
 
       {SHOW_DEBUG_OVERLAY.tilt && tiltDebugSnapshot && (
-        <div
-          style={{
-            position: 'absolute',
-            right: '12px',
-            bottom: '12px',
-            zIndex: 50,
-            background: 'rgba(0, 0, 0, 0.82)',
-            color: '#fff',
-            padding: '8px 10px',
-            borderRadius: '6px',
-            fontFamily: 'monospace',
-            fontSize: '12px',
-            lineHeight: 1.4,
-            maxWidth: '280px',
-          }}
-        >
-          <div style={{ fontWeight: 700, marginBottom: '4px' }}>Tilt debug</div>
-          <div>alpha: {tiltDebugSnapshot.latestRecord?.alpha?.toFixed(1) ?? 'n/a'}</div>
-          <div>beta: {tiltDebugSnapshot.latestRecord?.beta?.toFixed(1) ?? 'n/a'}</div>
-          <div>gamma: {tiltDebugSnapshot.latestRecord?.gamma?.toFixed(1) ?? 'n/a'}</div>
-          {tiltDebugSnapshot.machines.map((machine) => (
-            <div key={machine.type}>
-              {machine.type}: {machine.state}
-            </div>
-          ))}
-        </div>
+        <DebugOverlay
+          title="tilting values"
+          values={new Map<string, any>([
+            ['alpha', tiltDebugSnapshot.latestRecord?.alpha?.toFixed(1) ?? 'n/a'],
+            ['beta', tiltDebugSnapshot.latestRecord?.beta?.toFixed(1) ?? 'n/a'],
+            ['gamma', tiltDebugSnapshot.latestRecord?.gamma?.toFixed(1) ?? 'n/a'],
+            ['machines', tiltDebugSnapshot.machines],
+          ])}
+          style={{ left: '8px', bottom: '8px', zIndex: 50 }}
+        />
       )}
     </div>
   )
