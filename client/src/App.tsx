@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { TopBar } from './components/topbar/TopBar'
 import { NoteSpace } from './components/notespace/NoteSpace'
 import { DrumSpace } from './components/notespace/DrumSpace'
-import {SHOW_DEBUG_OVERLAY} from './app/debugHandler'
+import { SHOW_DEBUG_OVERLAY } from './app/debugHandler'
 import { ServerStatusOverlay } from './components/overlays/ServerStatusOverlay'
 import { GroupStatusOverlay } from './components/overlays/GroupStatusOverlay'
 import { GroupDebugOverlay } from './components/overlays/GroupDebugOverlay'
@@ -130,8 +130,10 @@ function App() {
   const drumsCompositionRef = useRef<Note[]>(drumsComposition)
   const octaveRef = useRef<number>(octave)
 
-   soundOctaveDown.volume = 0.1
-   soundOctaveUp.volume = 0.1
+
+  soundOctaveDown.volume = Tone.getDestination().mute ? 0 : 0.1
+  soundOctaveUp.volume = Tone.getDestination().mute ? 0 : 0.1
+
   // Refs for tracking the local device's group context and shared playback state
   const selfGroupContextRef = useRef<SelfGroupContext>({ groupId: null, columnIndex: null, sharedBpm: null })
   const serverClockOffsetMsRef = useRef<number>(0)
@@ -176,6 +178,7 @@ function App() {
 
   //Octave change tilt analyzer setup
   useEffect(() => {
+    if (instrument === Instrument.Drums) return; // Skip setting up the octave tilt analyzer for drums
 
     octaveTiltAnalyzerRef.current = new OctaveChangeTiltAnalyzer((interaction: CompletedInteraction) => {
       if (interaction.type === 'octaveChangeUp' && octave < 8) {
@@ -190,7 +193,7 @@ function App() {
     return () => {
       octaveTiltAnalyzerRef.current = null
     }
-  }, [])
+  }, [instrument])
 
   //Pour to copy tilt analyzer setup
   useEffect(() => {
@@ -221,7 +224,7 @@ function App() {
         emitPourInteraction('right', interaction.startedAt)
       }
     })
-    
+
     return () => {
       pourToCopyTiltAnalyzerRef.current = null
     }
@@ -1182,7 +1185,7 @@ function App() {
               onStop={handleStop}
             />
             {instrument === Instrument.Drums ? <DrumSpace progressRef={progressRef} /> : <NoteSpace progressRef={progressRef} playbackState={playback} />}
-            
+
           </ctx.SFXContextProvider>
         </ctx.UndoContextProvider>
       </ctx.DrawStateContextProvider>
@@ -1292,7 +1295,7 @@ function App() {
           <div>beta: {tiltDebugSnapshot.latestRecord?.beta?.toFixed(1) ?? 'n/a'}</div>
           <div>gamma: {tiltDebugSnapshot.latestRecord?.gamma?.toFixed(1) ?? 'n/a'}</div>
           {tiltDebugSnapshot.machines.map((machine) => (
-            <div key={machine.type}> 
+            <div key={machine.type}>
               {machine.type}: {machine.state}
             </div>
           ))}
