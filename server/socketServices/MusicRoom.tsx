@@ -21,15 +21,25 @@ import MusicClientSocketService from './MusicClientSocketService';
 
 type GroupPlaybackStatus = 'idle' | 'playing' | 'paused';
 
+const GROUP_COMPOSITION_GRID_COLS = 16;
+
+const getSharedCompositionDurationMs = (sharedBpm: number): number => {
+    return (GROUP_COMPOSITION_GRID_COLS / sharedBpm) * 60 * 1000;
+};
+
 interface GroupPlaybackSession {
     sharedBpm: number;
     status: GroupPlaybackStatus;
     activeColumnIndex: number;
+    activeScheduleToken: number;
     pausedPositionMs: number;
     scheduleToken: number;
     resetSequence: number;
     pauseRequestId: string | null;
     lastScheduledStartTimeMs: number | null;
+    pendingNextColumnIndex: number | null;
+    pendingNextScheduleToken: number | null;
+    pendingNextStartTimeMs: number | null;
 }
 
 interface NoteTransferData {
@@ -520,6 +530,7 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         }
 
         session.pauseRequestId = payload.requestId;
+        this.cancelPendingNextSchedule(group, session, 'pause');
 
         // The server does not know note timing, so the currently active column
         // reports the authoritative paused cursor position back to the room.
@@ -527,7 +538,7 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
             groupId: group.id,
             columnIndex: session.activeColumnIndex,
             requestId: payload.requestId,
-            scheduleToken: session.scheduleToken,
+            scheduleToken: session.activeScheduleToken,
         };
         this.emitToGroup(group, 'musicGroupPauseCapture', pauseCapturePayload);
     }
@@ -546,7 +557,7 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
             !session ||
             session.status !== 'playing' ||
             session.pauseRequestId !== payload.requestId ||
-            session.scheduleToken !== payload.scheduleToken
+            session.activeScheduleToken !== payload.scheduleToken
         ) {
             return;
         }
@@ -564,7 +575,7 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
             groupId: group.id,
             columnIndex: session.activeColumnIndex,
             pausedPositionMs: payload.positionMs,
-            scheduleToken: session.scheduleToken,
+            scheduleToken: session.activeScheduleToken,
         };
         this.emitToGroup(group, 'musicGroupPaused', pausedPayload);
     }
@@ -591,13 +602,32 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         }
 
         const session = this.groupPlaybackSessions.get(group.id);
-        if (
-            !session ||
-            session.status !== 'playing' ||
-            session.activeColumnIndex !== payload.columnIndex ||
-            session.scheduleToken !== payload.scheduleToken
-        ) {
+        if (!session || session.status !== 'playing') {
             return;
+        }
+
+        const matchesActiveSchedule =
+            session.activeColumnIndex === payload.columnIndex &&
+            session.activeScheduleToken === payload.scheduleToken;
+
+        const matchesPendingSchedule =
+            session.pendingNextColumnIndex === payload.columnIndex &&
+            session.pendingNextScheduleToken === payload.scheduleToken;
+
+        if (!matchesActiveSchedule && !matchesPendingSchedule) {
+            return;
+        }
+
+        if (matchesPendingSchedule) {
+            // Recovery path: if a pre-armed column finished before the server
+            // observed the prior column completion, treat this as authoritative
+            // and reconcile active session pointers.
+            session.activeColumnIndex = payload.columnIndex;
+            session.activeScheduleToken = payload.scheduleToken;
+            session.lastScheduledStartTimeMs = session.pendingNextStartTimeMs;
+            session.pendingNextColumnIndex = null;
+            session.pendingNextScheduleToken = null;
+            session.pendingNextStartTimeMs = null;
         }
 
         const clientPosition = client.device.groupGridPosition;
@@ -608,6 +638,22 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         const nextColumnIndex = payload.columnIndex + 1;
         if (nextColumnIndex >= group.devices.length) {
             this.stopGroupPlayback(group, 'naturalEnd');
+            return;
+        }
+
+        if (
+            session.pendingNextColumnIndex === nextColumnIndex &&
+            session.pendingNextScheduleToken !== null &&
+            session.pendingNextStartTimeMs !== null
+        ) {
+            session.activeColumnIndex = nextColumnIndex;
+            session.activeScheduleToken = session.pendingNextScheduleToken;
+            session.lastScheduledStartTimeMs = session.pendingNextStartTimeMs;
+            session.pendingNextColumnIndex = null;
+            session.pendingNextScheduleToken = null;
+            session.pendingNextStartTimeMs = null;
+
+            this.armFollowingColumn(group, session, nextColumnIndex, session.lastScheduledStartTimeMs);
             return;
         }
 
@@ -624,11 +670,15 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
             sharedBpm: MUSIC_GROUP_SHARED_BPM,
             status: 'idle',
             activeColumnIndex: 0,
+            activeScheduleToken: 0,
             pausedPositionMs: 0,
             scheduleToken: 0,
             resetSequence: 0,
             pauseRequestId: null,
             lastScheduledStartTimeMs: null,
+            pendingNextColumnIndex: null,
+            pendingNextScheduleToken: null,
+            pendingNextStartTimeMs: null,
         };
 
         this.groupPlaybackSessions.set(group.id, nextSession);
@@ -649,33 +699,40 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
 
         session.status = 'playing';
         session.activeColumnIndex = columnIndex;
+        session.activeScheduleToken = ++session.scheduleToken;
         session.pausedPositionMs = resumePositionMs;
-        session.scheduleToken += 1;
         session.pauseRequestId = null;
         session.lastScheduledStartTimeMs = Date.now() + this.scheduleBufferMs;
+        session.pendingNextColumnIndex = null;
+        session.pendingNextScheduleToken = null;
+        session.pendingNextStartTimeMs = null;
 
         const schedulePayload: MusicGroupColumnScheduledPayload = {
             groupId: group.id,
             columnIndex,
             resumePositionMs,
             scheduledStartTimeMs: session.lastScheduledStartTimeMs,
-            scheduleToken: session.scheduleToken,
+            scheduleToken: session.activeScheduleToken,
             sharedBpm: session.sharedBpm,
         };
 
         // Every group member receives the shared schedule metadata so controls
         // stay in sync, while only the active column actually starts audio.
         this.emitToGroup(group, 'musicGroupColumnScheduled', schedulePayload);
+
+        this.armFollowingColumn(group, session, columnIndex, session.lastScheduledStartTimeMs);
     }
 
     private stopGroupPlayback(group: MusicGroup, reason: MusicGroupResetReason): void {
         const session = this.getOrCreateGroupPlaybackSession(group);
 
+        this.cancelPendingNextSchedule(group, session, reason === 'naturalEnd' ? 'stop' : reason);
+
         if (this.hasPendingScheduledStart(session)) {
             const cancelPayload: MusicGroupCancelScheduledStartPayload = {
                 groupId: group.id,
                 columnIndex: session.activeColumnIndex,
-                scheduleToken: session.scheduleToken,
+                scheduleToken: session.activeScheduleToken,
                 reason: reason === 'naturalEnd' ? 'stop' : reason,
             };
             this.emitToGroup(group, 'musicGroupCancelScheduledStart', cancelPayload);
@@ -683,10 +740,14 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
 
         session.status = 'idle';
         session.activeColumnIndex = 0;
+        session.activeScheduleToken = 0;
         session.pausedPositionMs = 0;
         session.pauseRequestId = null;
         session.lastScheduledStartTimeMs = null;
         session.resetSequence += 1;
+        session.pendingNextColumnIndex = null;
+        session.pendingNextScheduleToken = null;
+        session.pendingNextStartTimeMs = null;
 
         const resetPayload: MusicGroupResetPayload = {
             groupId: group.id,
@@ -718,6 +779,64 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
 
     private hasPendingScheduledStart(session: GroupPlaybackSession): boolean {
         return session.lastScheduledStartTimeMs !== null && session.lastScheduledStartTimeMs > Date.now();
+    }
+
+    private cancelPendingNextSchedule(
+        group: MusicGroup,
+        session: GroupPlaybackSession,
+        reason: Exclude<MusicGroupResetReason, 'naturalEnd'> | 'pause'
+    ): void {
+        if (
+            session.pendingNextColumnIndex === null ||
+            session.pendingNextScheduleToken === null ||
+            session.pendingNextStartTimeMs === null ||
+            session.pendingNextStartTimeMs <= Date.now()
+        ) {
+            return;
+        }
+
+        const cancelPayload: MusicGroupCancelScheduledStartPayload = {
+            groupId: group.id,
+            columnIndex: session.pendingNextColumnIndex,
+            scheduleToken: session.pendingNextScheduleToken,
+            reason,
+        };
+        this.emitToGroup(group, 'musicGroupCancelScheduledStart', cancelPayload);
+
+        session.pendingNextColumnIndex = null;
+        session.pendingNextScheduleToken = null;
+        session.pendingNextStartTimeMs = null;
+    }
+
+    private armFollowingColumn(
+        group: MusicGroup,
+        session: GroupPlaybackSession,
+        currentColumnIndex: number,
+        currentStartTimeMs: number | null
+    ): void {
+        const nextColumnIndex = currentColumnIndex + 1;
+        const nextColumn = group.devices[nextColumnIndex];
+        if (!currentStartTimeMs || !nextColumn || nextColumn.length === 0) {
+            return;
+        }
+
+        const nextStartTimeMs = currentStartTimeMs + getSharedCompositionDurationMs(session.sharedBpm);
+        const nextScheduleToken = ++session.scheduleToken;
+
+        session.pendingNextColumnIndex = nextColumnIndex;
+        session.pendingNextScheduleToken = nextScheduleToken;
+        session.pendingNextStartTimeMs = nextStartTimeMs;
+
+        const nextPayload: MusicGroupColumnScheduledPayload = {
+            groupId: group.id,
+            columnIndex: nextColumnIndex,
+            resumePositionMs: 0,
+            scheduledStartTimeMs: nextStartTimeMs,
+            scheduleToken: nextScheduleToken,
+            sharedBpm: session.sharedBpm,
+        };
+
+        this.emitToGroup(group, 'musicGroupColumnScheduled', nextPayload);
     }
 
     private emitToGroup(group: MusicGroup, eventName: string, payload: unknown): void {

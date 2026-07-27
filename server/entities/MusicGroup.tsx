@@ -83,7 +83,7 @@ export interface MusicGroupCancelScheduledStartPayload {
     groupId: string;
     columnIndex: number;
     scheduleToken: number;
-    reason: Exclude<MusicGroupResetReason, 'naturalEnd'>;
+    reason: Exclude<MusicGroupResetReason, 'naturalEnd'> | 'pause';
 }
 
 export interface MusicGroupResetPayload {

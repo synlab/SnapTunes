@@ -548,8 +548,8 @@ function App() {
     }
 
     if (selfContext.columnIndex !== payload.columnIndex) {
-      activeGroupedScheduleRef.current = null
-      clearPendingGroupedStart()
+      // Pre-armed schedules for other columns are expected and must not cancel
+      // this device's own pending/current column start.
       return
     }
 
