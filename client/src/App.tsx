@@ -142,6 +142,7 @@ function App() {
   const pendingGroupedStartTimerRef = useRef<number | null>(null)
   const pendingGroupedStartTokenRef = useRef<number | null>(null)
   const activeGroupedScheduleRef = useRef<ActiveGroupedSchedule | null>(null)
+  const waitingForInitialGroupClockSyncRef = useRef<boolean>(false)
   const selfDeviceIdRef = useRef<string | null>(null)
   const pastedFromDirectionTimerRef = useRef<number | null>(null)
   const hasSnappedNeighborRef = useRef<boolean>(false)
@@ -341,6 +342,7 @@ function App() {
     }
 
     groupCommandPendingRef.current = null
+    waitingForInitialGroupClockSyncRef.current = false
     setGroupCommandPending(null)
   }
 
@@ -507,6 +509,7 @@ function App() {
 
     pendingClockRequestsRef.current.clear()
     bestClockSyncRttMsRef.current = null
+    waitingForInitialGroupClockSyncRef.current = false
   }
 
   const emitGroupedPlaybackCommand = (eventName: string): void => {
@@ -702,6 +705,11 @@ function App() {
         emitGroupedPlaybackCommand('musicGroupPauseRequest')
       } else {
         markGroupCommandPending('play')
+        if (bestClockSyncRttMsRef.current === null) {
+          waitingForInitialGroupClockSyncRef.current = true
+          requestClockSync()
+          return
+        }
         emitGroupedPlaybackCommand('musicGroupPlayRequest')
       }
       return
@@ -975,6 +983,11 @@ function App() {
         clientClockOffsetMs: serverClockOffsetMsRef.current,
       })
       syncGroupPlaybackDebugSnapshot({ serverClockOffsetMs: serverClockOffsetMsRef.current })
+
+      if (waitingForInitialGroupClockSyncRef.current && groupCommandPendingRef.current === 'play') {
+        waitingForInitialGroupClockSyncRef.current = false
+        emitGroupedPlaybackCommand('musicGroupPlayRequest')
+      }
     }
 
     const onMusicGroupColumnScheduled = (payload: MusicGroupColumnScheduledPayload): void => {
