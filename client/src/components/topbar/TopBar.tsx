@@ -301,7 +301,7 @@ export function TopBar({ volume, setVolume, displayedBpm, isGroupBpmLocked, grou
         <Slider
           value={displayedBpm}
           onChange={handleBPMChange}
-          min={30}
+          min={60}
           max={200}
           step={5}
           size="small"
