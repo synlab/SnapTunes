@@ -130,6 +130,8 @@ function App() {
   const startTimeRef = useRef<number | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const instrumentRef = useRef<Instrument | null>(instrument)
+  const playbackRef = useRef<0 | 1 | 2 | 'stop'>(playback)
+  const isGroupedRef = useRef<boolean>(false)
   const compositionRef = useRef<Note[]>(composition)
   const drumsCompositionRef = useRef<Note[]>(drumsComposition)
   const octaveRef = useRef<number>(octave)
@@ -273,6 +275,14 @@ function App() {
   useEffect(() => {
     instrumentRef.current = instrument
   }, [instrument])
+
+  useEffect(() => {
+    playbackRef.current = playback
+  }, [playback])
+
+  useEffect(() => {
+    isGroupedRef.current = isGrouped
+  }, [isGrouped])
 
   useEffect(() => {
     compositionRef.current = composition
@@ -1034,6 +1044,17 @@ function App() {
 
     const onShake = (data: MovementManagerDeviceEvent): void => {
       console.log(`🫨 Shake event received from device ${data.device.id.value}`);
+
+      // Pause ongoing progression before clearing when shake-to-remove is triggered.
+      if (isGroupedRef.current) {
+        if (playbackRef.current === 1 && !groupCommandPendingRef.current) {
+          markGroupCommandPending('pause')
+          emitGroupedPlaybackCommand('musicGroupPauseRequest')
+        }
+      } else if (playbackRef.current === 1) {
+        setPlayback(2)
+      }
+
       const activeInstrument = instrumentRef.current
       // Emit a targeted clear event for the currently active instrument family.
       requestClear(activeInstrument === Instrument.Drums ? 'drums' : 'melodic');
