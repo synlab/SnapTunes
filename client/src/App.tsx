@@ -16,6 +16,8 @@ import {
   MusicGroupClockSyncResponse,
   MusicGroupColumnFinishedPayload,
   MusicGroupColumnScheduledPayload,
+  MusicGroupLoopSetRequest,
+  MusicGroupLoopStatePayload,
   MusicGroupPauseCapturePayload,
   MusicGroupPauseReportPayload,
   MusicGroupPausedPayload,
@@ -96,11 +98,14 @@ interface PourTransferResolvedPayload {
 
 // Send a clock sync request every 5 seconds to keep the local clock offset estimate up to date
 const CLOCK_SYNC_INTERVAL_MS = 5000
+const INITIAL_GROUP_PLAY_SYNC_WAIT_MS = 350
 
 const soundOctaveUp = new Audio('/audio/feedback/OctaveChangeUp.wav');
 const soundOctaveDown = new Audio('/audio/feedback/OctaveChangeDown.wav');
 
 type GroupControlCommand = 'play' | 'pause' | 'stop'
+
+const clampProgress = (value: number): number => Math.max(0, Math.min(1, value))
 
 function App() {
   // Context hooks for accessing and updating the global state
@@ -143,6 +148,8 @@ function App() {
   const pendingGroupedStartTokenRef = useRef<number | null>(null)
   const activeGroupedScheduleRef = useRef<ActiveGroupedSchedule | null>(null)
   const waitingForInitialGroupClockSyncRef = useRef<boolean>(false)
+  const initialGroupedPlayFallbackTimerRef = useRef<number | null>(null)
+  const lastGroupTopologySignatureRef = useRef<string | null>(null)
   const selfDeviceIdRef = useRef<string | null>(null)
   const pastedFromDirectionTimerRef = useRef<number | null>(null)
   const hasSnappedNeighborRef = useRef<boolean>(false)
@@ -152,6 +159,7 @@ function App() {
   const [musicGroupState, setMusicGroupState] = useState<MusicGroupStatePayload | null>(null)
   const [connectedToServer, setConnectedToServer] = useState<boolean>(false)
   const [volume, setVolume] = useState<number>(-20)
+  const [loopEnabledLocal, setLoopEnabledLocal] = useState<boolean>(false)
   const [permissionGranted, setPermissionGranted] = useState<boolean>(false)
   const [groupCommandPending, setGroupCommandPending] = useState<GroupControlCommand | null>(null)
   const [audioContextUnlocked, setAudioContextUnlocked] = useState<boolean>(false)
@@ -168,6 +176,7 @@ function App() {
   const pourToCopyTiltAnalyzerRef = useRef<PourToCopyPasteTiltAnalyzer | null>(null)
   const groupCommandTimeoutRef = useRef<number | null>(null)
   const groupCommandPendingRef = useRef<GroupControlCommand | null>(null)
+  const loopEnabledLocalRef = useRef<boolean>(false)
 
   const { constructComposition } = useSamplerTransport({
     instrumentRef,
@@ -245,18 +254,18 @@ function App() {
     ))
   )
   const playbackBpm = currentGroup?.sharedBpm ?? bpm
+  const loopEnabled = isGrouped ? (currentGroup?.loopEnabled ?? false) : loopEnabledLocal
 
   useEffect(() => {
     selfDeviceIdRef.current = selfDeviceId
   }, [selfDeviceId])
 
   useEffect(() => {
+    loopEnabledLocalRef.current = loopEnabledLocal
+  }, [loopEnabledLocal])
+
+  useEffect(() => {
     hasSnappedNeighborRef.current = isSnappedWithAnotherDevice
-    if (!isSnappedWithAnotherDevice) {
-      setPourAttemptDirection(null)
-      setPastedFromDirection(null)
-      clearPastedFromDirectionTimer()
-    }
   }, [isSnappedWithAnotherDevice])
 
 
@@ -291,11 +300,26 @@ function App() {
   }, [currentGroup, selfDeviceState])
 
   useEffect(() => {
-    // Entering or leaving a group invalidates any local playback timeline. We
-    // stop immediately so grouped playback can restart from the server-owned state.
     if (!musicGroupState) {
+      lastGroupTopologySignatureRef.current = null
       return
     }
+
+    const selfState = musicGroupState.devices[musicGroupState.selfDeviceId]
+    const selfSignature = `${selfState?.groupId ?? 'none'}:${selfState?.position?.col ?? 'na'}:${selfState?.position?.row ?? 'na'}`
+    const groupsSignature = musicGroupState.groups
+      .map((group) => `${group.id}:${group.steps.map((step) => step.join(',')).join('|')}:${group.sharedBpm}`)
+      .sort()
+      .join(';')
+
+    const topologySignature = `${selfSignature}::${groupsSignature}`
+    if (lastGroupTopologySignatureRef.current === topologySignature) {
+      return
+    }
+
+    // Entering/leaving a group or changing topology invalidates local timeline.
+    // Non-topology updates (like loop mode flag sync) should not force a reset.
+    lastGroupTopologySignatureRef.current = topologySignature
 
     clearPendingGroupedStart()
     stopTransportPlayback(true)
@@ -339,6 +363,11 @@ function App() {
     if (groupCommandTimeoutRef.current !== null) {
       window.clearTimeout(groupCommandTimeoutRef.current)
       groupCommandTimeoutRef.current = null
+    }
+
+    if (initialGroupedPlayFallbackTimerRef.current !== null) {
+      window.clearTimeout(initialGroupedPlayFallbackTimerRef.current)
+      initialGroupedPlayFallbackTimerRef.current = null
     }
 
     groupCommandPendingRef.current = null
@@ -510,11 +539,25 @@ function App() {
     pendingClockRequestsRef.current.clear()
     bestClockSyncRttMsRef.current = null
     waitingForInitialGroupClockSyncRef.current = false
+    if (initialGroupedPlayFallbackTimerRef.current !== null) {
+      window.clearTimeout(initialGroupedPlayFallbackTimerRef.current)
+      initialGroupedPlayFallbackTimerRef.current = null
+    }
   }
 
   const emitGroupedPlaybackCommand = (eventName: string): void => {
     const payload: MusicGroupPlaybackCommand = { requestId: generateRequestId() }
     ServerSocketService.Connection.emit(eventName, payload)
+  }
+
+  const emitGroupedLoopSetRequest = (enabled: boolean): void => {
+    // Loop mode is server-authoritative in grouped playback: clients request,
+    // the room session decides, and then every member receives a loop state event.
+    const payload: MusicGroupLoopSetRequest = {
+      requestId: generateRequestId(),
+      enabled,
+    }
+    ServerSocketService.Connection.emit('musicGroupLoopSetRequest', payload)
   }
 
   const handleGroupedColumnFinished = (): void => {
@@ -553,14 +596,29 @@ function App() {
       return
     }
 
-    clearPendingGroupedStart()
-    stopTransportPlayback(false)
-
     const totalMs = getCompositionDurationMs(payload.sharedBpm)
-    const nextProgress = Math.max(0, Math.min(1, payload.resumePositionMs / totalMs))
+    const nextProgress = clampProgress(payload.resumePositionMs / totalMs)
     const localStartTimeMs = payload.scheduledStartTimeMs + serverClockOffsetMsRef.current
     const rawDelayMs = localStartTimeMs - Date.now()
     const delayMs = Math.max(0, rawDelayMs)
+    const activeSchedule = activeGroupedScheduleRef.current
+    const shouldQueueWhileCurrentRuns =
+      rawDelayMs > 0 &&
+      !!activeSchedule &&
+      activeSchedule.groupId === payload.groupId &&
+      activeSchedule.columnIndex === payload.columnIndex &&
+      activeSchedule.scheduleToken !== payload.scheduleToken
+
+    // Keep only one local pending start timer/token at a time. Newer server
+    // schedules supersede older ones if they target this same device column.
+    clearPendingGroupedStart()
+
+    // In a single-column loop, the server pre-arms the next cycle using the
+    // same column index. Keep the current cycle running until the scheduled
+    // handoff time instead of pausing immediately.
+    if (!shouldQueueWhileCurrentRuns) {
+      stopTransportPlayback(false)
+    }
 
     console.log('shared playback start received', {
       groupId: payload.groupId,
@@ -574,17 +632,9 @@ function App() {
     })
 
     pendingGroupedStartTokenRef.current = payload.scheduleToken
-    activeGroupedScheduleRef.current = {
-      groupId: payload.groupId,
-      columnIndex: payload.columnIndex,
-      scheduleToken: payload.scheduleToken,
-      sharedBpm: payload.sharedBpm,
-    }
-    syncGroupPlaybackDebugSnapshot({
-      groupId: payload.groupId,
-      columnIndex: payload.columnIndex,
-      scheduleToken: payload.scheduleToken,
-    })
+    // Record pending token for debug visibility. Active schedule is updated only
+    // when the local handoff time is reached.
+    syncGroupPlaybackDebugSnapshot({ scheduleToken: payload.scheduleToken })
 
     const startScheduledColumn = (): void => {
       if (pendingGroupedStartTokenRef.current !== payload.scheduleToken) {
@@ -594,6 +644,19 @@ function App() {
       pendingGroupedStartTimerRef.current = null
       pendingGroupedStartTokenRef.current = null
       progressRef.current = nextProgress
+      // Token ownership moves from pending -> active exactly at local start,
+      // which prevents early token replacement during pre-armed loop cycles.
+      activeGroupedScheduleRef.current = {
+        groupId: payload.groupId,
+        columnIndex: payload.columnIndex,
+        scheduleToken: payload.scheduleToken,
+        sharedBpm: payload.sharedBpm,
+      }
+      syncGroupPlaybackDebugSnapshot({
+        groupId: payload.groupId,
+        columnIndex: payload.columnIndex,
+        scheduleToken: payload.scheduleToken,
+      })
       void startTransportPlayback(payload.sharedBpm, nextProgress, handleGroupedColumnFinished).catch((error: unknown) => {
         console.error('Failed to start shared playback', error)
       })
@@ -624,6 +687,8 @@ function App() {
     stopTransportPlayback(false)
     setPlayback(2)
 
+    // The active column reports progress in ms so the server can rebroadcast
+    // one authoritative paused cursor for every client in the group.
     const totalMs = getCompositionDurationMs(activeSchedule.sharedBpm)
     const pausedPositionMs = Math.round(progressRef.current * totalMs)
     const reportPayload: MusicGroupPauseReportPayload = {
@@ -662,7 +727,7 @@ function App() {
 
     const groupBpm = selfContext.sharedBpm ?? MUSIC_GROUP_SHARED_BPM
     const totalMs = getCompositionDurationMs(groupBpm)
-    progressRef.current = Math.max(0, Math.min(1, payload.pausedPositionMs / totalMs))
+    progressRef.current = clampProgress(payload.pausedPositionMs / totalMs)
   }
 
   const handleGroupedCancelScheduledStart = (payload: MusicGroupCancelScheduledStartPayload): void => {
@@ -703,15 +768,31 @@ function App() {
       if (playback === 1) {
         markGroupCommandPending('pause')
         emitGroupedPlaybackCommand('musicGroupPauseRequest')
-      } else {
-        markGroupCommandPending('play')
-        if (bestClockSyncRttMsRef.current === null) {
-          waitingForInitialGroupClockSyncRef.current = true
-          requestClockSync()
-          return
-        }
-        emitGroupedPlaybackCommand('musicGroupPlayRequest')
+        return
       }
+
+      markGroupCommandPending('play')
+      if (bestClockSyncRttMsRef.current === null) {
+        waitingForInitialGroupClockSyncRef.current = true
+        requestClockSync()
+
+        // Safety fallback: if no sync response arrives quickly, still issue
+        // the grouped play request so controls never stay locked.
+        initialGroupedPlayFallbackTimerRef.current = window.setTimeout(() => {
+          if (!waitingForInitialGroupClockSyncRef.current || groupCommandPendingRef.current !== 'play') {
+            return
+          }
+
+          waitingForInitialGroupClockSyncRef.current = false
+          initialGroupedPlayFallbackTimerRef.current = null
+          emitGroupedPlaybackCommand('musicGroupPlayRequest')
+        }, INITIAL_GROUP_PLAY_SYNC_WAIT_MS)
+        return
+      }
+
+      // If we already have a recent RTT sample, skip the startup wait and ask
+      // the server to schedule immediately.
+      emitGroupedPlaybackCommand('musicGroupPlayRequest')
       return
     }
 
@@ -731,6 +812,16 @@ function App() {
     }
 
     setPlayback(0)
+  }
+
+  const handleLoopToggle = (): void => {
+    if (isGrouped) {
+      // Shared loop mode lives in group session state on the server.
+      emitGroupedLoopSetRequest(!loopEnabled)
+      return
+    }
+
+    setLoopEnabledLocal((previous) => !previous)
   }
 
   const requestDeviceMotionPermission = async () => {
@@ -985,6 +1076,10 @@ function App() {
       syncGroupPlaybackDebugSnapshot({ serverClockOffsetMs: serverClockOffsetMsRef.current })
 
       if (waitingForInitialGroupClockSyncRef.current && groupCommandPendingRef.current === 'play') {
+        if (initialGroupedPlayFallbackTimerRef.current !== null) {
+          window.clearTimeout(initialGroupedPlayFallbackTimerRef.current)
+          initialGroupedPlayFallbackTimerRef.current = null
+        }
         waitingForInitialGroupClockSyncRef.current = false
         emitGroupedPlaybackCommand('musicGroupPlayRequest')
       }
@@ -1008,6 +1103,30 @@ function App() {
 
     const onMusicGroupReset = (payload: MusicGroupResetPayload): void => {
       handleGroupedReset(payload)
+    }
+
+    const onMusicGroupLoopState = (payload: MusicGroupLoopStatePayload): void => {
+      setMusicGroupState((previous) => {
+        if (!previous) {
+          return previous
+        }
+
+        const nextGroups = previous.groups.map((group) => {
+          if (group.id !== payload.groupId) {
+            return group
+          }
+
+          return {
+            ...group,
+            loopEnabled: payload.enabled,
+          }
+        })
+
+        return {
+          ...previous,
+          groups: nextGroups,
+        }
+      })
     }
 
     const onPourTransferResolved = (payload: PourTransferResolvedPayload): void => {
@@ -1067,6 +1186,7 @@ function App() {
     ServerSocketService.Connection.on('musicGroupPaused', onMusicGroupPaused)
     ServerSocketService.Connection.on('musicGroupCancelScheduledStart', onMusicGroupCancelScheduledStart)
     ServerSocketService.Connection.on('musicGroupReset', onMusicGroupReset)
+    ServerSocketService.Connection.on('musicGroupLoopState', onMusicGroupLoopState)
     ServerSocketService.Connection.on('pourTransferResolved', onPourTransferResolved)
     ServerSocketService.Connection.on('connectedToServer', onConnectedToServer)
 
@@ -1117,6 +1237,7 @@ function App() {
       ServerSocketService.Connection.off('musicGroupPaused', onMusicGroupPaused)
       ServerSocketService.Connection.off('musicGroupCancelScheduledStart', onMusicGroupCancelScheduledStart)
       ServerSocketService.Connection.off('musicGroupReset', onMusicGroupReset)
+      ServerSocketService.Connection.off('musicGroupLoopState', onMusicGroupLoopState)
       ServerSocketService.Connection.off('pourTransferResolved', onPourTransferResolved)
       ServerSocketService.Connection.off('connectedToServer', onConnectedToServer)
       clearPastedFromDirectionTimer()
@@ -1141,6 +1262,8 @@ function App() {
 
   useEffect(() => {
     if (isGrouped) {
+      // In grouped mode, local playback is driven by schedule events from the
+      // server, so this local-only effect should stay inert.
       return () => {
         cancelAnimationLoop()
       }
@@ -1148,9 +1271,22 @@ function App() {
 
     //Composition is playing
     if (playback === 1) {
-      startTransportPlayback(playbackBpm, progressRef.current, () => {
+      const handleLocalPlaybackComplete = (): void => {
+        if (loopEnabledLocalRef.current) {
+          // Solo loop mode is purely local and restarts immediately at bar start.
+          progressRef.current = 0
+          void startTransportPlayback(playbackBpm, 0, handleLocalPlaybackComplete).catch((error: unknown) => {
+            console.error('Failed to restart local loop playback', error)
+          })
+          return
+        }
+
         progressRef.current = 0
         setPlayback('stop')
+      }
+
+      startTransportPlayback(playbackBpm, progressRef.current, () => {
+        handleLocalPlaybackComplete()
       })
     } else {
       stopTransportPlayback(playback === 0 || playback == 'stop')
@@ -1193,8 +1329,10 @@ function App() {
               isGroupBpmLocked={isGrouped}
               groupedControlsDisabled={isGrouped && !!groupCommandPending}
               audioContextUnlocked={audioContextUnlocked}
+              loopEnabled={loopEnabled}
               onPlayPause={handlePlayPause}
               onStop={handleStop}
+              onToggleLoop={handleLoopToggle}
             />
             {instrument === Instrument.Drums ? <DrumSpace progressRef={progressRef} /> : <NoteSpace progressRef={progressRef} playbackState={playback} />}
 

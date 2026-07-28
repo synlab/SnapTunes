@@ -9,6 +9,7 @@ import VolumeUpRoundedIcon from '@mui/icons-material/VolumeUpRounded'
 import VolumeOffRoundedIcon from '@mui/icons-material/VolumeOffRounded'
 import FullscreenIcon from '@mui/icons-material/Fullscreen'
 import FullscreenExitIcon from '@mui/icons-material/Fullscreen'
+import AllInclusiveRoundedIcon from '@mui/icons-material/AllInclusiveRounded'
 import * as ctx from '../../contexts/snaptunestatecontext'
 
 import { MdOutlinePiano } from 'react-icons/md'
@@ -24,8 +25,10 @@ interface TopBarProps {
   isGroupBpmLocked: boolean
   groupedControlsDisabled: boolean
   audioContextUnlocked: boolean
+  loopEnabled: boolean
   onPlayPause: () => Promise<void>
   onStop: () => void
+  onToggleLoop: () => void
 }
 
 interface InstrumentPreset {
@@ -66,7 +69,7 @@ const INSTRUMENT_PRESETS: InstrumentPreset[] = [
   { label: Instrument.Drums, icon: <LiaDrumSolid fontSize="28px" /> },
 ]
 
-export function TopBar({ volume, setVolume, displayedBpm, isGroupBpmLocked, groupedControlsDisabled, audioContextUnlocked, onPlayPause, onStop }: TopBarProps) {
+export function TopBar({ volume, setVolume, displayedBpm, isGroupBpmLocked, groupedControlsDisabled, audioContextUnlocked, loopEnabled, onPlayPause, onStop, onToggleLoop }: TopBarProps) {
   const { playback } = ctx.usePlayback()
   const { setUndo } = ctx.useUpdateUndo()
   const { setBPM } = ctx.useUpdateBPM()
@@ -247,6 +250,21 @@ export function TopBar({ volume, setVolume, displayedBpm, isGroupBpmLocked, grou
         <Tooltip title={groupedControlsDisabled ? 'Waiting for server sync...' : 'Stop'} placement="bottom">
           <IconButton sx={buttonStyle} disabled={groupedControlsDisabled} onClick={onStop}>
             <StopRoundedIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title={loopEnabled ? 'Loop on' : 'Loop off'} placement="bottom">
+          <IconButton
+            sx={{
+              ...buttonStyle,
+              color: loopEnabled ? '#ffffff' : '#4c66cf',
+              backgroundColor: loopEnabled ? '#4c66cf' : '#ffffff',
+              '&:hover': {
+                backgroundColor: loopEnabled ? '#4058b3' : '#f0f0f0',
+              },
+            }}
+            onClick={onToggleLoop}
+          >
+            <AllInclusiveRoundedIcon fontSize="small" />
           </IconButton>
         </Tooltip>
       </div>

@@ -18,6 +18,7 @@ export interface MusicGroupStatePayload {
         id: string;
         steps: string[][];
         sharedBpm: number;
+        loopEnabled: boolean;
     }>;
     devices: Record<string, MusicGroupDeviceState>;
 }
@@ -41,6 +42,17 @@ export interface MusicGroupClockSyncResponse {
 
 export interface MusicGroupPlaybackCommand {
     requestId: string;
+}
+
+export interface MusicGroupLoopSetRequest {
+    requestId: string;
+    enabled: boolean;
+}
+
+export interface MusicGroupLoopStatePayload {
+    groupId: string;
+    enabled: boolean;
+    sequence: number;
 }
 
 export interface MusicGroupColumnScheduledPayload {
