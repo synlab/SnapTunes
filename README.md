@@ -11,9 +11,9 @@ WIP
 4. Start the backend server (`npm start` in the `server` folder)
 5. Start the frontend client (`npm run dev` in the `client` folder)
 
-⚠️ Make sure that you are connected on the same wifi hotspot for all devices involved (laptop, tablets, etc.) 
+⚠️ Make sure that you are connected on the same wifi hotspot for all devices involved (laptop, tablets, etc.)
 
-6. In the client terminal, you should find a link next to `Network` that looks like `https://{your.local.ip.address}:5173/`
+6. In the client terminal, you should find a link next to `Network` that looks like `https://{your.local.ip.address}:5173/`. You can also find your ip adress by opening a new terminal, enter 'ipconfig' and search for the line 'IPv4 Adress:', this is your local ip adress.
 7. On your device (a tablet, for example), open a web page with this link. You should see a "Your connection is not private" warning page. Click the "ADVANCED" button, then "Proceed to {client link} (unsafe)".
 8. Open another web tab, connect to the same link but replace `5173` with `4000`, and repeat the same steps for the warning page that pops up.
 
