@@ -10,9 +10,15 @@ WIP
    - `cd client && npm i` and `cd server && npm i`
 4. Start the backend server (`npm start` in the `server` folder)
 5. Start the frontend client (`npm run dev` in the `client` folder)
+
+⚠️ Make sure that you are connected on the same wifi hotspot for all devices involved (laptop, tablets, etc.) 
+
 6. In the client terminal, you should find a link next to `Network` that looks like `https://{your.local.ip.address}:5173/`
 7. On your device (a tablet, for example), open a web page with this link. You should see a "Your connection is not private" warning page. Click the "ADVANCED" button, then "Proceed to {client link} (unsafe)".
 8. Open another web tab, connect to the same link but replace `5173` with `4000`, and repeat the same steps for the warning page that pops up.
+
+⚠️ If you have a blank page or a loading page (for more than a minute), you might need to check if the wifi you're connected to is allowing the server exposition on the network.
+
 9. Go back to the client tab and enjoy SnapTunes! (Repeat steps 7 and 8 for every device you want to use SnapTunes with.)
 10. You can activate/deactivate debug overlays by switching boolean values in [debugHandler.ts](client\src\app\debugHandler.ts).
 
@@ -21,4 +27,5 @@ WIP
 - **Backend:** Express.js (Node.js)
 - **Communication:** Socket.IO (WebSockets)
 
-## WIP
+## Note for devs
+You'll need to restart the server (npm start) everytime you want to see the modifications you've just made.
