@@ -81,6 +81,22 @@ export class PourToCopyPasteTiltAnalyzer extends TiltAnalyzer {
 
         return isWithinBetaRange && isWithinGammaRange
     }
+
+    public isPouringLeft(): boolean {
+        const machine = this.machines.find(m => m.type === 'pourLeft')
+        if (!machine) {
+            return false
+        }
+        return machine.state === 'HOLDING'
+    }
+
+    public isPouringRight(): boolean {
+        const machine = this.machines.find(m => m.type === 'pourRight')
+        if (!machine) {
+            return false
+        }
+        return machine.state === 'HOLDING'
+    }
 }
 
 type DirectionMachineState = 'IDLE' | 'HOLDING'

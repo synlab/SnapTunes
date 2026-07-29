@@ -923,12 +923,6 @@ function App() {
   };
 
   useEffect(() => {
-    const isWithinTolerance = (value: number | null, target: number, toleranceDeg: number): boolean => {
-      if (value === null) {
-        return false
-      }
-      return Math.abs(value - target) <= toleranceDeg
-    }
 
     const processTiltEvent = (event: DeviceOrientationEvent): void => {
       octaveTiltAnalyzerRef.current?.addARecord(event)
@@ -937,20 +931,12 @@ function App() {
       setTiltDebugSnapshot(pourToCopyTiltAnalyzerRef.current?.getDebugSnapshot() ?? null)
     }
 
-    const getActivePourDirectionFromOrientation = (event: DeviceOrientationEvent): 'left' | 'right' | null => {
-      const isWithinGammaRange = isWithinTolerance(event.gamma, 0, 5)
-      if (!isWithinGammaRange) {
-        return null
-      }
-
-      if (isWithinTolerance(event.beta, 40, 15)) {
+    const getActivePourDirectionFromOrientation = (): 'left' | 'right' | null => {
+      if(pourToCopyTiltAnalyzerRef.current?.isPouringLeft()) {
+        return 'left'
+      }else if(pourToCopyTiltAnalyzerRef.current?.isPouringRight()) {
         return 'right'
       }
-
-      if (isWithinTolerance(event.beta, -40, 15)) {
-        return 'left'
-      }
-
       return null
     }
 
@@ -963,8 +949,7 @@ function App() {
 
       // The badge is purely local feedback: show only while current sample
       // is inside a valid pour orientation and the device has neighbors.
-      const activePourDirection = getActivePourDirectionFromOrientation(event)
-      setPourAttemptDirection(activePourDirection)
+      setPourAttemptDirection(getActivePourDirectionFromOrientation())
 
       processTiltEvent(event)
     }
