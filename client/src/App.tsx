@@ -38,7 +38,6 @@ import { MovementManagerDeviceEvent } from 'simsnap-core/src/entities/VirtualRoo
 import { type CompletedInteraction } from './app/services/TiltAnalyzerService'
 import { OctaveChangeTiltAnalyzer } from './app/services/OctaveChangeTiltAnalyzer'
 import { PourToCopyPasteTiltAnalyzer } from './app/services/PourToCopyPasteTiltAnalyzer'
-import { OVERLAY_BASE_STYLE, OVERLAY_DEBUG_PANEL_STYLE, OVERLAY_MONOSPACE_TEXT_STYLE } from './components/overlays/overlayStyles'
 
 
 //For visualizing snap borders between devices
@@ -1085,14 +1084,14 @@ function App() {
       setlastTimeSnapOrUnsnapContext(Date.now()) // Update the last time a snap or unsnap event occurred
 
       const isVerticalBorder = ['left', 'right'].includes(position)
-      const strokeWidth = '5px'
+      const strokeWidth = '15px'
       const isCurrentlyFullscreen = !!document.fullscreenElement
 
       setSnapBorders((prev) => [
         ...prev.filter((border) => border.id !== snapedDeviceId),
         {
           id: snapedDeviceId,
-          x: isVerticalBorder ? (position === 'left' ? '0px' : `calc(100% - ${strokeWidth})`) : strokeWidth,
+          x: isVerticalBorder ? (position === 'left' ? '0px' : `calc(100% - ${strokeWidth})`) : '0px',
           y: isVerticalBorder ? '0px' : position === 'top' ? '0px' : `calc(100% - ${strokeWidth})`,
           width: isVerticalBorder ? strokeWidth : '100%',
           height: isVerticalBorder && isCurrentlyFullscreen ? '100%' : isVerticalBorder ? '100%' : strokeWidth,
@@ -1518,6 +1517,19 @@ function App() {
         style={{ right: '8px', bottom: '8px', zIndex: 50 }}
       />
 
+      {SHOW_DEBUG_OVERLAY.tilt && tiltDebugSnapshot && (
+        <DebugOverlay
+          title="tilting values"
+          values={new Map<string, any>([
+            ['alpha', tiltDebugSnapshot.latestRecord?.alpha?.toFixed(1) ?? 'n/a'],
+            ['beta', tiltDebugSnapshot.latestRecord?.beta?.toFixed(1) ?? 'n/a'],
+            ['gamma', tiltDebugSnapshot.latestRecord?.gamma?.toFixed(1) ?? 'n/a'],
+            ['machines', tiltDebugSnapshot.machines],
+          ])}
+          style={{ left: '8px', bottom: '8px', zIndex: 50 }}
+        />
+      )}
+
       {isSnappedWithAnotherDevice && pourAttemptDirection && (
         <div
           style={{
@@ -1566,18 +1578,6 @@ function App() {
         </div>
       )}
 
-      {SHOW_DEBUG_OVERLAY.tilt && tiltDebugSnapshot && (
-        <DebugOverlay
-          title="tilting values"
-          values={new Map<string, any>([
-            ['alpha', tiltDebugSnapshot.latestRecord?.alpha?.toFixed(1) ?? 'n/a'],
-            ['beta', tiltDebugSnapshot.latestRecord?.beta?.toFixed(1) ?? 'n/a'],
-            ['gamma', tiltDebugSnapshot.latestRecord?.gamma?.toFixed(1) ?? 'n/a'],
-            ['machines', tiltDebugSnapshot.machines],
-          ])}
-          style={{ left: '8px', bottom: '8px', zIndex: 50 }}
-        />
-      )}
     </div>
   )
 }
