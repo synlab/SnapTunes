@@ -24,13 +24,20 @@ export interface TiltAnalyzerDebugSnapshot {
 }
 
 export abstract class TiltAnalyzer {
+    private static readonly DEFAULT_MAX_HISTORY_RECORDS = 300
+
     protected history: DeviceOrientationRecord[] = []
     protected completedInteractions: CompletedInteraction[] = []
     protected latestRecord: DeviceOrientationRecord | null = null
+    protected readonly maxHistoryRecords: number
     public readonly onInteractionCompleted?: (interaction: CompletedInteraction) => void
 
-    constructor(onInteractionCompleted?: (interaction: CompletedInteraction) => void) {
+    constructor(
+        onInteractionCompleted?: (interaction: CompletedInteraction) => void,
+        maxHistoryRecords: number = TiltAnalyzer.DEFAULT_MAX_HISTORY_RECORDS,
+    ) {
         this.onInteractionCompleted = onInteractionCompleted
+        this.maxHistoryRecords = Math.max(1, Math.floor(maxHistoryRecords))
     }
 
     public addARecord(record: DeviceOrientationEvent): void {
@@ -43,6 +50,10 @@ export abstract class TiltAnalyzer {
 
         this.latestRecord = normalizedRecord
         this.history.push(normalizedRecord)
+        if (this.history.length > this.maxHistoryRecords) {
+            // Keep only the newest samples so memory usage stays bounded.
+            this.history.splice(0, this.history.length - this.maxHistoryRecords)
+        }
 
         this.manageRecord()
     }
