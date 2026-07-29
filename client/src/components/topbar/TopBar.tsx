@@ -22,10 +22,12 @@ interface TopBarProps {
   volume: number,
   setVolume: React.Dispatch<React.SetStateAction<number>>
   displayedBpm: number
-  isGroupBpmLocked: boolean
+  bpmSliderDisabled: boolean
   groupedControlsDisabled: boolean
-  audioContextUnlocked: boolean
   loopEnabled: boolean
+  onBpmEditBegin: () => void
+  onBpmChange: (value: number) => void
+  onBpmEditEnd: () => void
   onPlayPause: () => Promise<void>
   onStop: () => void
   onToggleLoop: () => void
@@ -69,10 +71,9 @@ const INSTRUMENT_PRESETS: InstrumentPreset[] = [
   { label: Instrument.Drums, icon: <LiaDrumSolid fontSize="28px" /> },
 ]
 
-export function TopBar({ volume, setVolume, displayedBpm, isGroupBpmLocked, groupedControlsDisabled, audioContextUnlocked, loopEnabled, onPlayPause, onStop, onToggleLoop }: TopBarProps) {
+export function TopBar({ volume, setVolume, displayedBpm, bpmSliderDisabled, groupedControlsDisabled, loopEnabled, onBpmEditBegin, onBpmChange, onBpmEditEnd, onPlayPause, onStop, onToggleLoop }: TopBarProps) {
   const { playback } = ctx.usePlayback()
   const { setUndo } = ctx.useUpdateUndo()
-  const { setBPM } = ctx.useUpdateBPM()
 
   const { instrument } = ctx.useInstrument()
   const { setInstrument } = ctx.useUpdateInstrument()
@@ -128,8 +129,17 @@ export function TopBar({ volume, setVolume, displayedBpm, isGroupBpmLocked, grou
     setVolume(Array.isArray(value) ? value[0] : value)
   }
   const handleBPMChange = (_event: Event, value: number | number[]): void => {
-    if (isGroupBpmLocked) return
-    setBPM(Array.isArray(value) ? value[0] : value)
+    if (bpmSliderDisabled) return
+    onBpmChange(Array.isArray(value) ? value[0] : value)
+  }
+
+  const handleBpmEditBegin = (): void => {
+    if (bpmSliderDisabled) return
+    onBpmEditBegin()
+  }
+
+  const handleBpmEditEnd = (): void => {
+    onBpmEditEnd()
   }
 
   const handleInstrumentPointerDown = (
@@ -300,27 +310,34 @@ export function TopBar({ volume, setVolume, displayedBpm, isGroupBpmLocked, grou
 
         <Slider
           value={displayedBpm}
+          onMouseDown={handleBpmEditBegin}
+          onTouchStart={handleBpmEditBegin}
+          onMouseUp={handleBpmEditEnd}
+          onTouchEnd={handleBpmEditEnd}
           onChange={handleBPMChange}
+          onChangeCommitted={handleBpmEditEnd}
           min={60}
           max={200}
           step={5}
           size="small"
-          disabled={isGroupBpmLocked}
-          sx={bpmSliderSx}
+          disabled={bpmSliderDisabled}
+          sx={{
+            ...bpmSliderSx,
+            opacity: bpmSliderDisabled ? 0.55 : 1,
+            '& .MuiSlider-thumb': {
+              width: 12,
+              height: 12,
+              backgroundColor: bpmSliderDisabled ? '#7c7c7c' : '#4c66cf',
+            },
+            '& .MuiSlider-track': {
+              backgroundColor: bpmSliderDisabled ? '#7c7c7c' : '#4c66cf',
+              border: 'none',
+            },
+            '& .MuiSlider-rail': {
+              backgroundColor: bpmSliderDisabled ? '#dfdfdf' : '#fff',
+            },
+          }}
         />
-        {isGroupBpmLocked && (
-          <div
-            style={{
-              color: audioContextUnlocked ? '#ffffff' : '#ffe38a',
-              fontSize: '10px',
-              fontFamily: 'monospace',
-              minWidth: '90px',
-              textAlign: 'left',
-            }}
-          >
-            audio: {audioContextUnlocked ? 'ready' : 'tap screen'}
-          </div>
-        )}
       </div>
       <Tooltip title="Fullscreen" placement="bottom">
         <IconButton sx={buttonStyle} onClick={toggleFullscreen}>

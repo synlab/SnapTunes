@@ -11,6 +11,10 @@ import './App.css'
 import {
   Instrument,
   MUSIC_GROUP_SHARED_BPM,
+  MusicGroupBpmEditBeginRequest,
+  MusicGroupBpmEditEndRequest,
+  MusicGroupBpmSetRequest,
+  MusicGroupBpmStatePayload,
   MusicGroupCancelScheduledStartPayload,
   MusicGroupClockSyncRequest,
   MusicGroupClockSyncResponse,
@@ -115,6 +119,7 @@ function App() {
   const { setComposition } = ctx.useUpdateComposition()
   const { setDrumsComposition } = ctx.useUpdateDrumsComposition()
   const { bpm } = ctx.useBPM()
+  const { setBPM } = ctx.useUpdateBPM()
   const { composition } = ctx.useComposition()
   const { drumsComposition } = ctx.useDrumsComposition()
   const { octave } = ctx.useOctave()
@@ -155,6 +160,7 @@ function App() {
   const selfDeviceIdRef = useRef<string | null>(null)
   const pastedFromDirectionTimerRef = useRef<number | null>(null)
   const hasSnappedNeighborRef = useRef<boolean>(false)
+  const bpmSliderInteractionActiveRef = useRef<boolean>(false)
 
 
   const [snapBorders, setSnapBorders] = useState<SnapBorder[]>([])
@@ -257,6 +263,11 @@ function App() {
   )
   const playbackBpm = currentGroup?.sharedBpm ?? bpm
   const loopEnabled = isGrouped ? (currentGroup?.loopEnabled ?? false) : loopEnabledLocal
+  const isGroupPlaybackActive = isGrouped && currentGroup?.playbackStatus === 'playing'
+  const isBpmLockedByPeer = isGrouped
+    && !!currentGroup?.bpmEditOwnerDeviceId
+    && currentGroup.bpmEditOwnerDeviceId !== selfDeviceId
+  const isBpmSliderDisabled = isGroupPlaybackActive || isBpmLockedByPeer
 
   useEffect(() => {
     selfDeviceIdRef.current = selfDeviceId
@@ -269,6 +280,12 @@ function App() {
   useEffect(() => {
     hasSnappedNeighborRef.current = isSnappedWithAnotherDevice
   }, [isSnappedWithAnotherDevice])
+
+  useEffect(() => {
+    if (!isGrouped || isBpmSliderDisabled) {
+      bpmSliderInteractionActiveRef.current = false
+    }
+  }, [isGrouped, isBpmSliderDisabled])
 
 
   // Update refs whenever the corresponding context state variables change
@@ -318,7 +335,9 @@ function App() {
     const selfState = musicGroupState.devices[musicGroupState.selfDeviceId]
     const selfSignature = `${selfState?.groupId ?? 'none'}:${selfState?.position?.col ?? 'na'}:${selfState?.position?.row ?? 'na'}`
     const groupsSignature = musicGroupState.groups
-      .map((group) => `${group.id}:${group.steps.map((step) => step.join(',')).join('|')}:${group.sharedBpm}`)
+      // Topology signature must only include structure (group ids + layout).
+      // Shared BPM changes are state updates, not topology mutations.
+      .map((group) => `${group.id}:${group.steps.map((step) => step.join(',')).join('|')}`)
       .sort()
       .join(';')
 
@@ -568,6 +587,56 @@ function App() {
       enabled,
     }
     ServerSocketService.Connection.emit('musicGroupLoopSetRequest', payload)
+  }
+
+  const beginGroupedBpmEdit = (): void => {
+    if (!isGrouped || isBpmSliderDisabled || bpmSliderInteractionActiveRef.current) {
+      return
+    }
+
+    const payload: MusicGroupBpmEditBeginRequest = { requestId: generateRequestId() }
+    bpmSliderInteractionActiveRef.current = true
+    ServerSocketService.Connection.emit('musicGroupBpmEditBeginRequest', payload)
+  }
+
+  const emitGroupedBpmSetRequest = (nextBpm: number): void => {
+    if (!isGrouped || isBpmSliderDisabled) {
+      return
+    }
+
+    if (!bpmSliderInteractionActiveRef.current) {
+      beginGroupedBpmEdit()
+    }
+
+    const payload: MusicGroupBpmSetRequest = {
+      requestId: generateRequestId(),
+      bpm: nextBpm,
+    }
+    ServerSocketService.Connection.emit('musicGroupBpmSetRequest', payload)
+  }
+
+  const endGroupedBpmEdit = (): void => {
+    if (!bpmSliderInteractionActiveRef.current) {
+      return
+    }
+
+    bpmSliderInteractionActiveRef.current = false
+
+    if (!isGrouped) {
+      return
+    }
+
+    const payload: MusicGroupBpmEditEndRequest = { requestId: generateRequestId() }
+    ServerSocketService.Connection.emit('musicGroupBpmEditEndRequest', payload)
+  }
+
+  const handleBpmChange = (nextBpm: number): void => {
+    if (isGrouped) {
+      emitGroupedBpmSetRequest(nextBpm)
+      return
+    }
+
+    setBPM(nextBpm)
   }
 
   const handleGroupedColumnFinished = (): void => {
@@ -1150,6 +1219,38 @@ function App() {
       })
     }
 
+    const onMusicGroupBpmState = (payload: MusicGroupBpmStatePayload): void => {
+      setMusicGroupState((previous) => {
+        if (!previous) {
+          return previous
+        }
+
+        const nextGroups = previous.groups.map((group) => {
+          if (group.id !== payload.groupId) {
+            return group
+          }
+
+          return {
+            ...group,
+            sharedBpm: payload.sharedBpm,
+            bpmEditOwnerDeviceId: payload.bpmEditOwnerDeviceId,
+          }
+        })
+
+        return {
+          ...previous,
+          groups: nextGroups,
+        }
+      })
+
+      const localDeviceId = selfDeviceIdRef.current
+      if (!localDeviceId || payload.bpmEditOwnerDeviceId === localDeviceId) {
+        return
+      }
+
+      bpmSliderInteractionActiveRef.current = false
+    }
+
     const onPourTransferResolved = (payload: PourTransferResolvedPayload): void => {
       const localDeviceId = selfDeviceIdRef.current
       if (!localDeviceId) {
@@ -1184,6 +1285,7 @@ function App() {
         setPourAttemptDirection(null)
         setPastedFromDirection(null)
         clearPastedFromDirectionTimer()
+        bpmSliderInteractionActiveRef.current = false
       }
     }
 
@@ -1208,6 +1310,7 @@ function App() {
     ServerSocketService.Connection.on('musicGroupCancelScheduledStart', onMusicGroupCancelScheduledStart)
     ServerSocketService.Connection.on('musicGroupReset', onMusicGroupReset)
     ServerSocketService.Connection.on('musicGroupLoopState', onMusicGroupLoopState)
+    ServerSocketService.Connection.on('musicGroupBpmState', onMusicGroupBpmState)
     ServerSocketService.Connection.on('pourTransferResolved', onPourTransferResolved)
     ServerSocketService.Connection.on('connectedToServer', onConnectedToServer)
 
@@ -1259,9 +1362,11 @@ function App() {
       ServerSocketService.Connection.off('musicGroupCancelScheduledStart', onMusicGroupCancelScheduledStart)
       ServerSocketService.Connection.off('musicGroupReset', onMusicGroupReset)
       ServerSocketService.Connection.off('musicGroupLoopState', onMusicGroupLoopState)
+      ServerSocketService.Connection.off('musicGroupBpmState', onMusicGroupBpmState)
       ServerSocketService.Connection.off('pourTransferResolved', onPourTransferResolved)
       ServerSocketService.Connection.off('connectedToServer', onConnectedToServer)
       clearPastedFromDirectionTimer()
+      bpmSliderInteractionActiveRef.current = false
       ServerSocketService.emit('destroy', undefined);
       containerRef.current!.onpointerdown = null;
       containerRef.current!.onpointermove = null;
@@ -1347,10 +1452,12 @@ function App() {
               volume={volume}
               setVolume={setVolume}
               displayedBpm={playbackBpm}
-              isGroupBpmLocked={isGrouped}
+              bpmSliderDisabled={isBpmSliderDisabled}
               groupedControlsDisabled={isGrouped && !!groupCommandPending}
-              audioContextUnlocked={audioContextUnlocked}
               loopEnabled={loopEnabled}
+              onBpmEditBegin={beginGroupedBpmEdit}
+              onBpmChange={handleBpmChange}
+              onBpmEditEnd={endGroupedBpmEdit}
               onPlayPause={handlePlayPause}
               onStop={handleStop}
               onToggleLoop={handleLoopToggle}

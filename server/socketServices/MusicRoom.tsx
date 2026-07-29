@@ -4,6 +4,10 @@ import MusicDevice from '../entities/MusicDevice';
 import {
     MUSIC_GROUP_SHARED_BPM,
     MusicGroup,
+    MusicGroupBpmEditBeginRequest,
+    MusicGroupBpmEditEndRequest,
+    MusicGroupBpmSetRequest,
+    MusicGroupBpmStatePayload,
     MusicGroupCancelScheduledStartPayload,
     MusicGroupClockSyncRequest,
     MusicGroupClockSyncResponse,
@@ -31,6 +35,8 @@ const getSharedCompositionDurationMs = (sharedBpm: number): number => {
 
 interface GroupPlaybackSession {
     sharedBpm: number;
+    bpmEditOwnerDeviceId: string | null;
+    bpmStateSequence: number;
     loopEnabled: boolean;
     loopStateSequence: number;
     status: GroupPlaybackStatus;
@@ -107,8 +113,10 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
     private readonly groupPlaybackSessions: Map<string, GroupPlaybackSession> = new Map<string, GroupPlaybackSession>();
     private readonly pendingPourIntentsByDeviceId: Map<string, PendingPourIntent> = new Map<string, PendingPourIntent>();
     private readonly pairExchangeLocksByKey: Map<string, PairExchangeLock> = new Map<string, PairExchangeLock>();
+    private readonly groupBpmLockTimeoutByGroupId: Map<string, NodeJS.Timeout> = new Map<string, NodeJS.Timeout>();
     private readonly scheduleBufferMs = 200;
     private readonly maxPourIntentAgeMs = 4000;
+    private readonly bpmLockInactivityTimeoutMs = 1500;
 
     constructor(ioServer: Server, override virtualRoom: VirtualRoom = new VirtualRoom()) {
         super('', ioServer, virtualRoom, (clientSocket) => new MusicClientSocketService(clientSocket, virtualRoom));
@@ -145,6 +153,7 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
     }
 
     clientQuit(client: MusicClientSocketService): void {
+        this.releaseBpmEditLocksForDevice(client.device.id.value);
         this.clients = this.clients.filter((currentClient) => currentClient.clientSocket.id !== client.clientSocket.id);
         this.pendingPourIntentsByDeviceId.delete(client.device.id.value);
         this.pruneExchangeLocksForDevice(client.device.id.value);
@@ -188,6 +197,15 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         });
         client.clientSocket.on('musicGroupLoopSetRequest', (payload: MusicGroupLoopSetRequest) => {
             this.handleMusicGroupLoopSetRequest(client, payload);
+        });
+        client.clientSocket.on('musicGroupBpmEditBeginRequest', (payload: MusicGroupBpmEditBeginRequest) => {
+            this.handleMusicGroupBpmEditBeginRequest(client, payload);
+        });
+        client.clientSocket.on('musicGroupBpmSetRequest', (payload: MusicGroupBpmSetRequest) => {
+            this.handleMusicGroupBpmSetRequest(client, payload);
+        });
+        client.clientSocket.on('musicGroupBpmEditEndRequest', (payload: MusicGroupBpmEditEndRequest) => {
+            this.handleMusicGroupBpmEditEndRequest(client, payload);
         });
         client.clientSocket.on('musicGroupColumnFinished', (payload: MusicGroupColumnFinishedPayload) => {
             this.handleMusicGroupColumnFinished(client, payload);
@@ -348,6 +366,8 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         if (!musicDevice || !musicDevice.id) {
             return;
         }
+
+        this.releaseBpmEditLocksForDevice(musicDevice.id.value);
 
         this.pendingPourIntentsByDeviceId.delete(musicDevice.id.value);
         this.pruneExchangeLocksForDevice(musicDevice.id.value);
@@ -532,6 +552,7 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
 
         const resumePositionMs = session.status === 'paused' ? session.pausedPositionMs : 0;
         const columnIndex = session.status === 'paused' ? session.activeColumnIndex : 0;
+        this.releaseGroupBpmEditLock(group, session);
         this.scheduleGroupColumn(group, session, columnIndex, resumePositionMs);
     }
 
@@ -598,6 +619,7 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
             scheduleToken: session.activeScheduleToken,
         };
         this.emitToGroup(group, 'musicGroupPaused', pausedPayload);
+        this.emitMusicGroupState();
     }
 
     private handleMusicGroupStopRequest(
@@ -656,6 +678,93 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
 
         this.emitGroupLoopState(group, session);
         this.emitMusicGroupState();
+    }
+
+    private handleMusicGroupBpmEditBeginRequest(
+        client: MusicClientSocketService,
+        _payload: MusicGroupBpmEditBeginRequest
+    ): void {
+        const group = client.device.musicGroup;
+        if (!group) {
+            return;
+        }
+
+        const session = this.getOrCreateGroupPlaybackSession(group);
+        if (session.status === 'playing') {
+            return;
+        }
+
+        const requesterId = client.device.id.value;
+        if (session.bpmEditOwnerDeviceId && session.bpmEditOwnerDeviceId !== requesterId) {
+            return;
+        }
+
+        const ownerChanged = session.bpmEditOwnerDeviceId !== requesterId;
+        session.bpmEditOwnerDeviceId = requesterId;
+        this.rearmGroupBpmLockTimeout(group.id, requesterId);
+
+        if (ownerChanged) {
+            this.emitGroupBpmState(group, session);
+            this.emitMusicGroupState();
+        }
+    }
+
+    private handleMusicGroupBpmSetRequest(
+        client: MusicClientSocketService,
+        payload: MusicGroupBpmSetRequest
+    ): void {
+        const group = client.device.musicGroup;
+        if (!group) {
+            return;
+        }
+
+        const session = this.getOrCreateGroupPlaybackSession(group);
+        if (session.status === 'playing') {
+            return;
+        }
+
+        const requesterId = client.device.id.value;
+        if (session.bpmEditOwnerDeviceId !== requesterId) {
+            return;
+        }
+
+        const normalizedBpm = this.normalizeGroupedBpm(payload.bpm);
+        if (session.sharedBpm === normalizedBpm) {
+            this.rearmGroupBpmLockTimeout(group.id, requesterId);
+            return;
+        }
+
+        if (session.status === 'paused') {
+            const oldDurationMs = getSharedCompositionDurationMs(session.sharedBpm);
+            const newDurationMs = getSharedCompositionDurationMs(normalizedBpm);
+            const pausedProgress = oldDurationMs > 0
+                ? Math.max(0, Math.min(1, session.pausedPositionMs / oldDurationMs))
+                : 0;
+            // Keep the same musical cursor location when BPM changes during pause.
+            session.pausedPositionMs = Math.round(pausedProgress * newDurationMs);
+        }
+
+        session.sharedBpm = normalizedBpm;
+        this.rearmGroupBpmLockTimeout(group.id, requesterId);
+        this.emitGroupBpmState(group, session);
+        this.emitMusicGroupState();
+    }
+
+    private handleMusicGroupBpmEditEndRequest(
+        client: MusicClientSocketService,
+        _payload: MusicGroupBpmEditEndRequest
+    ): void {
+        const group = client.device.musicGroup;
+        if (!group) {
+            return;
+        }
+
+        const session = this.getOrCreateGroupPlaybackSession(group);
+        if (session.bpmEditOwnerDeviceId !== client.device.id.value) {
+            return;
+        }
+
+        this.releaseGroupBpmEditLock(group, session);
     }
 
     private handleMusicGroupColumnFinished(
@@ -740,6 +849,8 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
 
         const nextSession: GroupPlaybackSession = {
             sharedBpm: MUSIC_GROUP_SHARED_BPM,
+            bpmEditOwnerDeviceId: null,
+            bpmStateSequence: 0,
             loopEnabled: false,
             loopStateSequence: 0,
             status: 'idle',
@@ -794,11 +905,15 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         // stay in sync, while only the active column actually starts audio.
         this.emitToGroup(group, 'musicGroupColumnScheduled', schedulePayload);
 
+        this.emitMusicGroupState();
+
         this.armFollowingColumn(group, session, columnIndex, session.lastScheduledStartTimeMs);
     }
 
     private stopGroupPlayback(group: MusicGroup, reason: MusicGroupResetReason): void {
         const session = this.getOrCreateGroupPlaybackSession(group);
+
+        this.releaseGroupBpmEditLock(group, session);
 
         this.cancelPendingNextSchedule(group, session, reason === 'naturalEnd' ? 'stop' : reason);
 
@@ -829,6 +944,7 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
             sequence: session.resetSequence,
         };
         this.emitToGroup(group, 'musicGroupReset', resetPayload);
+        this.emitMusicGroupState();
     }
 
     private stopPlaybackForAffectedGroups(...groups: Array<MusicGroup | null>): void {
@@ -936,6 +1052,17 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
     private emitToGroup(group: MusicGroup, eventName: string, payload: unknown): void {
         group.getMembers().forEach((device) => {
             device.client.clientSocket.emit(eventName, payload);
+        });
+    }
+
+    private releaseBpmEditLocksForDevice(deviceId: string): void {
+        this.musicGroups.forEach((group) => {
+            const session = this.groupPlaybackSessions.get(group.id);
+            if (!session || session.bpmEditOwnerDeviceId !== deviceId) {
+                return;
+            }
+
+            this.releaseGroupBpmEditLock(group, session);
         });
     }
 
@@ -1094,6 +1221,7 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         Array.from(this.groupPlaybackSessions.keys()).forEach((groupId) => {
             if (!activeGroupIds.has(groupId)) {
                 this.groupPlaybackSessions.delete(groupId);
+                this.clearGroupBpmLockTimeout(groupId);
             }
         });
     }
@@ -1114,6 +1242,12 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
             if (a[1] !== b[1]) return b[1] - a[1];
             return a[0].localeCompare(b[0]);
         });
+
+        // If multiple prior groups contribute equally to the merged component,
+        // force a fresh group id so the resulting session resets to default BPM.
+        if (ranked.length > 1 && ranked[0][1] === ranked[1][1]) {
+            return undefined;
+        }
 
         return ranked[0]?.[0];
     }
@@ -1177,12 +1311,18 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
             };
         });
 
-        const groups = this.musicGroups.map((group) => ({
-            id: group.id,
-            steps: group.devices.map((step) => step.map((device) => device.id.value)),
-            sharedBpm: MUSIC_GROUP_SHARED_BPM,
-            loopEnabled: this.groupPlaybackSessions.get(group.id)?.loopEnabled ?? false,
-        }));
+        const groups = this.musicGroups.map((group) => {
+            const session = this.getOrCreateGroupPlaybackSession(group);
+
+            return {
+                id: group.id,
+                steps: group.devices.map((step) => step.map((device) => device.id.value)),
+                sharedBpm: session.sharedBpm,
+                bpmEditOwnerDeviceId: session.bpmEditOwnerDeviceId,
+                playbackStatus: session.status,
+                loopEnabled: session.loopEnabled,
+            };
+        });
 
         // Full snapshot broadcast keeps client logic simple and resilient after reconnects.
         this.clients.forEach((client) => {
@@ -1194,5 +1334,65 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
             };
             client.clientSocket.emit('musicGroupState', payload);
         });
+    }
+
+    private emitGroupBpmState(group: MusicGroup, session: GroupPlaybackSession): void {
+        const payload: MusicGroupBpmStatePayload = {
+            groupId: group.id,
+            sharedBpm: session.sharedBpm,
+            bpmEditOwnerDeviceId: session.bpmEditOwnerDeviceId,
+            sequence: ++session.bpmStateSequence,
+        };
+
+        this.emitToGroup(group, 'musicGroupBpmState', payload);
+    }
+
+    private normalizeGroupedBpm(value: number): number {
+        const clamped = Math.max(60, Math.min(200, value));
+        return Math.round(clamped / 5) * 5;
+    }
+
+    private clearGroupBpmLockTimeout(groupId: string): void {
+        const existingTimeout = this.groupBpmLockTimeoutByGroupId.get(groupId);
+        if (!existingTimeout) {
+            return;
+        }
+
+        clearTimeout(existingTimeout);
+        this.groupBpmLockTimeoutByGroupId.delete(groupId);
+    }
+
+    private rearmGroupBpmLockTimeout(groupId: string, ownerDeviceId: string): void {
+        this.clearGroupBpmLockTimeout(groupId);
+
+        const timeout = setTimeout(() => {
+            const group = this.musicGroups.find((candidate) => candidate.id === groupId);
+            if (!group) {
+                this.clearGroupBpmLockTimeout(groupId);
+                return;
+            }
+
+            const session = this.groupPlaybackSessions.get(groupId);
+            if (!session || session.bpmEditOwnerDeviceId !== ownerDeviceId || session.status === 'playing') {
+                this.clearGroupBpmLockTimeout(groupId);
+                return;
+            }
+
+            this.releaseGroupBpmEditLock(group, session);
+        }, this.bpmLockInactivityTimeoutMs);
+
+        this.groupBpmLockTimeoutByGroupId.set(groupId, timeout);
+    }
+
+    private releaseGroupBpmEditLock(group: MusicGroup, session: GroupPlaybackSession): void {
+        if (!session.bpmEditOwnerDeviceId) {
+            this.clearGroupBpmLockTimeout(group.id);
+            return;
+        }
+
+        session.bpmEditOwnerDeviceId = null;
+        this.clearGroupBpmLockTimeout(group.id);
+        this.emitGroupBpmState(group, session);
+        this.emitMusicGroupState();
     }
 }

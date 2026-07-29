@@ -113,6 +113,8 @@ export interface MusicGroupStatePayload {
     id: string
     steps: string[][]
     sharedBpm: number
+    bpmEditOwnerDeviceId: string | null
+    playbackStatus: 'idle' | 'playing' | 'paused'
     loopEnabled: boolean
   }>
   devices: Record<string, MusicGroupDeviceState>
@@ -147,6 +149,26 @@ export interface MusicGroupLoopSetRequest {
 export interface MusicGroupLoopStatePayload {
   groupId: string
   enabled: boolean
+  sequence: number
+}
+
+export interface MusicGroupBpmEditBeginRequest {
+  requestId: string
+}
+
+export interface MusicGroupBpmSetRequest {
+  requestId: string
+  bpm: number
+}
+
+export interface MusicGroupBpmEditEndRequest {
+  requestId: string
+}
+
+export interface MusicGroupBpmStatePayload {
+  groupId: string
+  sharedBpm: number
+  bpmEditOwnerDeviceId: string | null
   sequence: number
 }
 
