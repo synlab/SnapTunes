@@ -279,13 +279,15 @@ export function TopBar({ volume, setVolume, displayedBpm, bpmSliderDisabled, gro
         </Tooltip>
       </div>
 
-      <div>
-        <Tooltip title="undo" placement="top">
-          <IconButton onClick={() => setUndo(true)} sx={buttonStyle}>
-            <UndoRoundedIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-      </div>
+      {instrument !== 'drums' && (
+        <div>
+          <Tooltip title="undo" placement="top">
+            <IconButton onClick={() => setUndo(true)} sx={buttonStyle}>
+              <UndoRoundedIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
         <div
