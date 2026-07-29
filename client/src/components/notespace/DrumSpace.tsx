@@ -11,10 +11,10 @@ interface Track {
 }
 
 const TRACKS: Track[] = [
-  { label: 'Kick', color: '#cc4410' },
-  { label: 'Snare', color: '#7a9a10' },
-  { label: 'Hi-Hat', color: '#6655cc' },
-  { label: 'Clap', color: '#4c66cf' },
+  { label: 'KICK', color: '#cc4410' },
+  { label: 'SNARE', color: '#7a9a10' },
+  { label: 'HI-HAT', color: '#6655cc' },
+  { label: 'CLAP', color: '#4c66cf' },
 ]
 
 const STEPS = GRID_COLS
@@ -179,7 +179,7 @@ export function DrumSpace({ progressRef }: DrumSpaceProps) {
           >
             <span
               style={{
-                fontSize: '12px',
+                fontSize: '20px',
                 fontFamily: 'monospace',
                 fontWeight: '600',
                 color: track.color,
