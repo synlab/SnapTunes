@@ -83,7 +83,7 @@ export class OctaveChangeTiltAnalyzer extends TiltAnalyzer {
 
             const actualHoldDurationMs = record.timestamp - (machine.holdEnteredAt ?? record.timestamp)
             const minimalHoldDuration = 2000 // 2 seconds
-            const maximalDurationToReturn = 3000 // 3 seconds
+            const maximalDurationToReturn = 4000 // 3 seconds
 
             // The checkpoint only validates after the target has been held long enough.
             if (actualHoldDurationMs >= minimalHoldDuration) {
@@ -125,5 +125,13 @@ export class OctaveChangeTiltAnalyzer extends TiltAnalyzer {
         machine.state = 'OUT_OF_SEQUENCE'
         machine.holdEnteredAt = null
         machine.returnDeadline = null
+    }
+
+    public isAwaitingReturnOctaveChangeUp(): boolean {
+        const machine = this.machines.find(m => m.type === 'octaveChangeUp')
+        if (!machine) {
+            return false
+        }
+        return machine.state === 'AWAITING_RETURN'
     }
 }

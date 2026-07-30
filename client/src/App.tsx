@@ -38,7 +38,7 @@ import { MovementManagerDeviceEvent } from 'simsnap-core/src/entities/VirtualRoo
 import { type CompletedInteraction } from './app/services/TiltAnalyzerService'
 import { OctaveChangeTiltAnalyzer } from './app/services/OctaveChangeTiltAnalyzer'
 import { PourToCopyPasteTiltAnalyzer } from './app/services/PourToCopyPasteTiltAnalyzer'
-
+import tiltBackGif from './assets/tilt_back_octave.gif'; 
 
 //For visualizing snap borders between devices
 interface SnapBorder {
@@ -169,7 +169,6 @@ function App() {
   const [loopEnabledLocal, setLoopEnabledLocal] = useState<boolean>(false)
   const [permissionGranted, setPermissionGranted] = useState<boolean>(false)
   const [groupCommandPending, setGroupCommandPending] = useState<GroupControlCommand | null>(null)
-  const [audioContextUnlocked, setAudioContextUnlocked] = useState<boolean>(false)
   const [groupPlaybackDebugSnapshot, setGroupPlaybackDebugSnapshot] = useState<GroupPlaybackDebugSnapshot>({
     groupId: null,
     columnIndex: null,
@@ -177,11 +176,16 @@ function App() {
     serverClockOffsetMs: 0,
   })
   const [tiltDebugSnapshot, setTiltDebugSnapshot] = useState<ReturnType<OctaveChangeTiltAnalyzer['getDebugSnapshot']> | null>(null)
-  const [pourAttemptDirection, setPourAttemptDirection] = useState<'left' | 'right' | null>(null)
-  const [pastedFromDirection, setPastedFromDirection] = useState<'left' | 'right' | null>(null)
-  const octaveTiltAnalyzerRef = useRef<OctaveChangeTiltAnalyzer | null>(null)
+  
+  // Refs and state for managing the pour-to-copy/paste interaction
   const pourToCopyTiltAnalyzerRef = useRef<PourToCopyPasteTiltAnalyzer | null>(null)
   const groupCommandTimeoutRef = useRef<number | null>(null)
+  const [pourAttemptDirection, setPourAttemptDirection] = useState<'left' | 'right' | null>(null)
+  const [pastedFromDirection, setPastedFromDirection] = useState<'left' | 'right' | null>(null)
+  
+  // Refs and state for managing the octave change interaction
+  const octaveTiltAnalyzerRef = useRef<OctaveChangeTiltAnalyzer | null>(null)
+  
   const groupCommandPendingRef = useRef<GroupControlCommand | null>(null)
   const loopEnabledLocalRef = useRef<boolean>(false)
 
@@ -445,7 +449,6 @@ function App() {
       await Tone.start()
       await Tone.getContext().rawContext.resume()
       const isRunning = Tone.getContext().state === 'running'
-      setAudioContextUnlocked(isRunning)
 
       if (!isRunning) {
         console.warn('AudioContext is not running after resume attempt', {
@@ -455,7 +458,6 @@ function App() {
 
       return isRunning
     } catch (error) {
-      setAudioContextUnlocked(false)
       console.error('Failed to unlock AudioContext', error)
       return false
     }
@@ -931,15 +933,6 @@ function App() {
       setTiltDebugSnapshot(pourToCopyTiltAnalyzerRef.current?.getDebugSnapshot() ?? null)
     }
 
-    const getActivePourDirectionFromOrientation = (): 'left' | 'right' | null => {
-      if(pourToCopyTiltAnalyzerRef.current?.isPouringLeft()) {
-        return 'left'
-      }else if(pourToCopyTiltAnalyzerRef.current?.isPouringRight()) {
-        return 'right'
-      }
-      return null
-    }
-
     const handleDeviceOrientation = (event: DeviceOrientationEvent) => {
       if (!hasSnappedNeighborRef.current) {
         setPourAttemptDirection(null)
@@ -947,11 +940,11 @@ function App() {
         return
       }
 
-      // The badge is purely local feedback: show only while current sample
-      // is inside a valid pour orientation and the device has neighbors.
-      setPourAttemptDirection(getActivePourDirectionFromOrientation())
-
       processTiltEvent(event)
+
+      // For visual feedback only
+      setPourAttemptDirection(pourToCopyTiltAnalyzerRef.current?.isPouringRight()? 'right' : pourToCopyTiltAnalyzerRef.current?.isPouringLeft()? 'left' : null)
+      
     }
 
     window.addEventListener('deviceorientation', handleDeviceOrientation)
@@ -959,7 +952,7 @@ function App() {
     return () => {
       window.removeEventListener('deviceorientation', handleDeviceOrientation)
     }
-  }, [setOctave])
+  }, [setTiltDebugSnapshot])
 
   // Device motion effect
   useEffect(() => {
@@ -1509,7 +1502,7 @@ function App() {
             ['alpha', tiltDebugSnapshot.latestRecord?.alpha?.toFixed(1) ?? 'n/a'],
             ['beta', tiltDebugSnapshot.latestRecord?.beta?.toFixed(1) ?? 'n/a'],
             ['gamma', tiltDebugSnapshot.latestRecord?.gamma?.toFixed(1) ?? 'n/a'],
-            ['machines', tiltDebugSnapshot.machines],
+            ['machines', tiltDebugSnapshot.machines]
           ])}
           style={{ left: '8px', bottom: '8px', zIndex: 50 }}
         />
@@ -1560,6 +1553,36 @@ function App() {
           }}
         >
           composition pasted from the {pastedFromDirection}
+        </div>
+      )}
+
+      {(octaveTiltAnalyzerRef.current?.isAwaitingReturnOctaveChangeUp()) && (
+        <div
+          style={{
+            position: 'absolute',
+            top: `0px`,
+            left: `${window.innerWidth / 2 - 100}px`,
+            zIndex: 60,
+            width: '200px',
+            background: 'rgba(10, 16, 28, 0.9)',
+            color: '#fff',
+            borderRadius: '10px',
+            border: '1px solid rgba(255, 255, 255, 0.35)',
+            padding: '14px 22px',
+            fontFamily: 'monospace',
+            fontSize: '16px',
+            fontWeight: 300,
+            textAlign: 'center',
+            lineHeight: 1,
+            pointerEvents: 'none',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '10px'
+          }}
+        >
+          return to the starting position to move up an octave
+          <img height="100" src={tiltBackGif} alt="Tilt back to return to the starting position to move up an octave" />
         </div>
       )}
 
