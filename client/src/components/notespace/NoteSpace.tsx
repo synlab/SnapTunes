@@ -121,7 +121,7 @@ export function NoteSpace({ progressRef, playbackState }: NoteSpaceProps) {
   // triggering p5 sketch remounts and React re-renders during pointer interactions.
   const selectedNoteRef = useRef<SelectionState | null>(null)
   const tapDetectionRef = useRef<{ noteId: string; x: number; y: number; timestamp: number } | null>(null)
-  const playbackStateRef = useRef< 1 | 2 | 0 | 'stop' | undefined>(playbackState)
+  const playbackStateRef = useRef<1 | 2 | 0 | 'stop' | undefined>(playbackState)
 
   //--- References ---//
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -268,7 +268,7 @@ export function NoteSpace({ progressRef, playbackState }: NoteSpaceProps) {
         const updated = sketchSelectedNote.note
         const changed = original.startTime !== updated.startTime || original.duration !== updated.duration
         if (changed) {
-          
+
           const withoutOriginal = compositionTemp.filter(n => n !== original)
           compositionTemp = applyNotesToComposition(withoutOriginal, [updated])
           historyRef.current.push([...compositionTemp])
@@ -395,7 +395,13 @@ export function NoteSpace({ progressRef, playbackState }: NoteSpaceProps) {
         for (let i = 0; i < GRID_ROWS; i++) {
           const y = i * rowHeight
           p.noStroke()
-          p.fill(255, 255, 255)
+          // SUGGESTION: Playback active, use a slightly tinted background to indicate that notes are being played
+          // if (playbackStateRef.current === 1) { 
+          //   p.fill(255, 255, 220)
+          // } else {
+            p.fill(255, 255, 255)
+          // }
+
           p.rect(0, y, p.width, rowHeight)
 
           p.stroke(...visualConfig.grid.lineColor)
@@ -865,7 +871,7 @@ export function NoteSpace({ progressRef, playbackState }: NoteSpaceProps) {
               const movedDistance = Math.hypot(deltaX, deltaY)
 
               // Single tap: enter selection mode (only if playback is paused or at 0)
-              if (movedDistance < LONG_PRESS_MOVE_TOLERANCE_PX ){ //&& (playbackStateRef.current === 0 || !playbackStateRef.current)) {
+              if (movedDistance < LONG_PRESS_MOVE_TOLERANCE_PX) { //&& (playbackStateRef.current === 0 || !playbackStateRef.current)) {
                 const sourceNote = pendingLongPressDrag.sourceNote
                 sketchSelectedNote = {
                   note: new Note(sourceNote.pitch, sourceNote.startTime, sourceNote.duration),

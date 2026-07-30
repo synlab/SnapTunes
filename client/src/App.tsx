@@ -264,13 +264,13 @@ function App() {
       deviceId !== selfDeviceId && deviceState.groupId === selfDeviceState.groupId
     ))
   )
+  const isPlaybackActive = playback === 1
   const playbackBpm = currentGroup?.sharedBpm ?? bpm
   const loopEnabled = isGrouped ? (currentGroup?.loopEnabled ?? false) : loopEnabledLocal
-  const isGroupPlaybackActive = isGrouped && currentGroup?.playbackStatus === 'playing'
   const isBpmLockedByPeer = isGrouped
     && !!currentGroup?.bpmEditOwnerDeviceId
     && currentGroup.bpmEditOwnerDeviceId !== selfDeviceId
-  const isBpmSliderDisabled = isGroupPlaybackActive || isBpmLockedByPeer
+  const isBpmSliderDisabled = isPlaybackActive || isBpmLockedByPeer 
 
   useEffect(() => {
     selfDeviceIdRef.current = selfDeviceId
