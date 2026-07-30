@@ -77,7 +77,7 @@ export class PourToCopyPasteTiltAnalyzer extends TiltAnalyzer {
         // - Shared gamma -5..5 => 0 ± 5
         const betaTarget = gestureType === 'pourLeft' ? -40 : 40
         const isWithinBetaRange = this.isWithinTolerance(record.beta, betaTarget, 15)
-        const isWithinGammaRange = this.isWithinTolerance(record.gamma, 0, 5)
+        const isWithinGammaRange = this.isWithinTolerance(record.gamma, 0, 20)
 
         return isWithinBetaRange && isWithinGammaRange
     }
