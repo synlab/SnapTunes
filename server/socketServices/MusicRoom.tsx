@@ -1198,11 +1198,9 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         }
 
         const expectedReceiverCol = giverIntent.positionCol + (giverIntent.direction === 'right' ? 1 : -1);
-        const expectedReceiverRow = giverIntent.positionRow;
-
+        
         if (
-            receiverIntent.positionCol !== expectedReceiverCol ||
-            receiverIntent.positionRow !== expectedReceiverRow
+            receiverIntent.positionCol !== expectedReceiverCol
         ) {
             return false;
         }
