@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { IconButton, Tooltip, Slider } from '@mui/material'
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
 import PauseRoundedIcon from '@mui/icons-material/PauseRounded'
@@ -8,9 +8,10 @@ import UndoRoundedIcon from '@mui/icons-material/UndoRounded'
 import VolumeUpRoundedIcon from '@mui/icons-material/VolumeUpRounded'
 import VolumeOffRoundedIcon from '@mui/icons-material/VolumeOffRounded'
 import FullscreenIcon from '@mui/icons-material/Fullscreen'
-import FullscreenExitIcon from '@mui/icons-material/Fullscreen'
+import FullscreenExitIcon from '@mui/icons-material/FullscreenExit'
 import AllInclusiveRoundedIcon from '@mui/icons-material/AllInclusiveRounded'
 import * as ctx from '../../contexts/snaptunestatecontext'
+import './TopBar.css'
 
 import { MdOutlinePiano } from 'react-icons/md'
 import { LuGuitar } from 'react-icons/lu'
@@ -36,19 +37,6 @@ interface TopBarProps {
 interface InstrumentPreset {
   label: Instrument
   icon: ReactNode
-}
-
-const buttonStyle = {
-  color: '#4c66cf',
-  backgroundColor: '#fff',
-  borderRadius: '6px',
-  padding: '6px',
-  '&:hover': { backgroundColor: '#f0f0f0' },
-}
-
-const playButtonStyle = {
-  ...buttonStyle,
-  padding: '8px',
 }
 
 const sliderSharedSx = {
@@ -152,126 +140,57 @@ export function TopBar({ volume, setVolume, displayedBpm, bpmSliderDisabled, gro
 
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        width: '100%',
-        height: '100%',
-        background: '#86a7e1',
-        borderRadius: '8px',
-        padding: '0 16px',
-        boxSizing: 'border-box',
-      }}
-    >
-      <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Tooltip title={isMuted ? 'Unmute' : 'Mute'} placement="bottom">
-            <IconButton sx={buttonStyle} onClick={toggleMute}>
-              <VolumeIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Slider
-            value={volume}
-            onChange={handleVolumeChange}
-            min={-40}
-            max={0}
-            size="small"
-            sx={sliderSharedSx}
-          />
-        </div>
+    <div className="topbar-grid">
+      <div className="topbar-cell topbar-volume-cell">
+        <Tooltip title={isMuted ? 'Unmute' : 'Mute'} placement="bottom">
+          <IconButton className="topbar-button" onClick={toggleMute}>
+            <VolumeIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+        <Slider
+          value={volume}
+          onChange={handleVolumeChange}
+          min={-40}
+          max={0}
+          size="small"
+          sx={sliderSharedSx}
+        />
+      </div>
+      <div className="topbar-cell">
+        <div className="topbar-instrument-group">
+        {INSTRUMENT_PRESETS.map((inst) => {
+          const theme = INSTRUMENT_THEMES[inst.label]
+          const isActive = activeInstrument === inst.label
+          const activeBg = `rgb(${theme.softRgb.join(', ')})`
+          const instrumentStyle = {
+            '--instrument-color': theme.hex,
+            '--instrument-active-bg': activeBg,
+          } as CSSProperties
 
-
-
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            padding: '4px',
-            background: '#fff',
-            borderRadius: '10px',
-            border: '1px solid rgba(0, 0, 0, 0.12)',
-          }}
-        >
-          {INSTRUMENT_PRESETS.map((inst) => {
-            const theme = INSTRUMENT_THEMES[inst.label]
-            const isActive = activeInstrument === inst.label
-            const activeBg = `rgb(${theme.softRgb.join(', ')})`
-
-            return (
-              <div key={inst.label} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                {inst.label === Instrument.Drums && (
-                  <div
-                    style={{
-                      width: '2px',
-                      height: '30px',
-                      background: '#d1d1d1',
-                      margin: '0 2px',
-                    }}
-                  />
-                )}
-                <Tooltip title={inst.label} placement="bottom" >
-                  <IconButton
-                    onPointerDown={(event) => handleInstrumentPointerDown(event, inst.label)}
-                    onClick={() => setInstrument(inst.label)}
-                    sx={{
-                      color: isActive ? theme.hex : '#8f8f8f',
-                      backgroundColor: isActive ? activeBg : '#efefef',
-                      borderRadius: '8px',
-                      border: isActive ? `2px solid ${theme.hex}` : '2px solid transparent',
-                      width: '42px',
-                      height: '42px',
-                      transition: 'all 0.15s ease',
-                      '&:hover': {
-                        backgroundColor: isActive ? activeBg : '#e3e3e3',
-                      },
-                      '&.Mui-focusVisible': {
-                        backgroundColor: isActive ? activeBg : '#efefef',
-                      },
-                      '&:active': {
-                        backgroundColor: isActive ? activeBg : '#e3e3e3',
-                      },
-                      '& svg': {
-                        color: isActive ? theme.hex : '#8f8f8f',
-                      },
-                    }}
-                  >
-                    {inst.icon}
-                  </IconButton>
-                </Tooltip>
-              </div>
-            )
-          })}
+          return (
+            <div key={inst.label} className="topbar-instrument-item">
+              {inst.label === Instrument.Drums && (
+                <div className="topbar-instrument-divider" />
+              )}
+              <Tooltip title={inst.label} placement="bottom" >
+                <IconButton
+                  onPointerDown={(event) => handleInstrumentPointerDown(event, inst.label)}
+                  onClick={() => setInstrument(inst.label)}
+                  className={`topbar-button topbar-instrument-button ${isActive ? 'topbar-instrument-button-active' : ''}`}
+                  style={instrumentStyle}
+                >
+                  {inst.icon}
+                </IconButton>
+              </Tooltip>
+            </div>
+          )
+        })}
         </div>
       </div>
-
-      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-        <Tooltip title={groupedControlsDisabled ? 'Waiting for server sync...' : 'Play'} placement="bottom">
-          <IconButton
-            sx={playButtonStyle}
-            disabled={groupedControlsDisabled}
-            onClick={onPlayPause}
-          >
-            <PlaybackButton />
-          </IconButton>
-        </Tooltip>
-        <Tooltip title={groupedControlsDisabled ? 'Waiting for server sync...' : 'Stop'} placement="bottom">
-          <IconButton sx={buttonStyle} disabled={groupedControlsDisabled} onClick={onStop}>
-            <StopRoundedIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
+      <div className="topbar-cell">
         <Tooltip title={loopEnabled ? 'Loop on' : 'Loop off'} placement="bottom">
           <IconButton
-            sx={{
-              ...buttonStyle,
-              color: loopEnabled ? '#ffffff' : '#4c66cf',
-              backgroundColor: loopEnabled ? '#4c66cf' : '#ffffff',
-              '&:hover': {
-                backgroundColor: loopEnabled ? '#4058b3' : '#f0f0f0',
-              },
-            }}
+            className={`topbar-button ${loopEnabled ? 'topbar-button-active' : ''}`}
             onClick={onToggleLoop}
           >
             <AllInclusiveRoundedIcon fontSize="small" />
@@ -279,33 +198,38 @@ export function TopBar({ volume, setVolume, displayedBpm, bpmSliderDisabled, gro
         </Tooltip>
       </div>
 
-      {instrument !== 'drums' && (
-        <div>
+      <div className="topbar-cell topbar-transport-cell">
+        <Tooltip title={groupedControlsDisabled ? 'Waiting for server sync...' : 'Play'} placement="bottom">
+          <IconButton
+            className="topbar-button"
+            disabled={groupedControlsDisabled}
+            onClick={onPlayPause}
+          >
+            <PlaybackButton />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title={groupedControlsDisabled ? 'Waiting for server sync...' : 'Stop'} placement="bottom">
+          <IconButton className="topbar-button" disabled={groupedControlsDisabled} onClick={onStop}>
+            <StopRoundedIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+
+      </div>
+
+      <div className="topbar-cell">
+        {instrument !== 'drums' && (
           <Tooltip title="undo" placement="top">
-            <IconButton onClick={() => setUndo(true)} sx={buttonStyle}>
+            <IconButton onClick={() => setUndo(true)} className="topbar-button">
               <UndoRoundedIcon fontSize="small" />
             </IconButton>
           </Tooltip>
-        </div>
-      )}
+        )}
+      </div>
 
-      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: '#86a7e1',
-            borderRadius: '6px',
-            padding: '2px 10px',
-            height: '36px',
-            lineHeight: 1,
-            minWidth: '48px',
-          }}
-        >
-          <span style={{ fontSize: '18px', fontWeight: 600, color: '#fff', fontFamily: 'monospace' }}>{displayedBpm}</span>
-          <span style={{ fontSize: '12px', color: '#fff', fontFamily: 'monospace', letterSpacing: '0.05em' }}>
+      <div className="topbar-cell topbar-bpm-cell">
+        <div className="topbar-bpm-display">
+          <span className="topbar-bpm-value">{displayedBpm}</span>
+          <span className="topbar-bpm-label">
             BPM
           </span>
         </div>
@@ -341,11 +265,13 @@ export function TopBar({ volume, setVolume, displayedBpm, bpmSliderDisabled, gro
           }}
         />
       </div>
-      <Tooltip title="Fullscreen" placement="bottom">
-        <IconButton sx={buttonStyle} onClick={toggleFullscreen}>
-          {isFullscreen ? <FullscreenIcon fontSize="small" /> : <FullscreenExitIcon fontSize="small" />}
-        </IconButton>
-      </Tooltip>
+      <div className="topbar-cell">
+        <Tooltip title="Fullscreen" placement="bottom">
+          <IconButton className="topbar-button" onClick={toggleFullscreen}>
+            {isFullscreen ? <FullscreenExitIcon fontSize="small" /> : <FullscreenIcon fontSize="small" />}
+          </IconButton>
+        </Tooltip>
+      </div>
     </div>
   )
 }
