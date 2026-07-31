@@ -20,8 +20,6 @@ import {
   MusicGroupClockSyncResponse,
   MusicGroupColumnFinishedPayload,
   MusicGroupColumnScheduledPayload,
-  MusicGroupLoopSetRequest,
-  MusicGroupLoopStatePayload,
   MusicGroupPauseCapturePayload,
   MusicGroupPauseReportPayload,
   MusicGroupPausedPayload,
@@ -187,7 +185,6 @@ function App() {
   const octaveTiltAnalyzerRef = useRef<OctaveChangeTiltAnalyzer | null>(null)
   
   const groupCommandPendingRef = useRef<GroupControlCommand | null>(null)
-  const loopEnabledLocalRef = useRef<boolean>(false)
 
   const { constructComposition } = useSamplerTransport({
     instrumentRef,
@@ -266,7 +263,7 @@ function App() {
   )
   const isPlaybackActive = playback === 1
   const playbackBpm = currentGroup?.sharedBpm ?? bpm
-  const loopEnabled = isGrouped ? (currentGroup?.loopEnabled ?? false) : loopEnabledLocal
+  const loopEnabled = loopEnabledLocal
   const isBpmLockedByPeer = isGrouped
     && !!currentGroup?.bpmEditOwnerDeviceId
     && currentGroup.bpmEditOwnerDeviceId !== selfDeviceId
@@ -275,10 +272,6 @@ function App() {
   useEffect(() => {
     selfDeviceIdRef.current = selfDeviceId
   }, [selfDeviceId])
-
-  useEffect(() => {
-    loopEnabledLocalRef.current = loopEnabledLocal
-  }, [loopEnabledLocal])
 
   useEffect(() => {
     hasSnappedNeighborRef.current = isSnappedWithAnotherDevice
@@ -441,7 +434,7 @@ function App() {
     groupCommandTimeoutRef.current = window.setTimeout(() => {
       console.warn(`Timed out waiting for shared ${command} acknowledgement`)
       clearGroupCommandPending()
-    }, 5000)
+    }, 1000)
   }
 
   const ensureAudioContextRunning = async (): Promise<boolean> => {
@@ -580,16 +573,6 @@ function App() {
     ServerSocketService.Connection.emit(eventName, payload)
   }
 
-  const emitGroupedLoopSetRequest = (enabled: boolean): void => {
-    // Loop mode is server-authoritative in grouped playback: clients request,
-    // the room session decides, and then every member receives a loop state event.
-    const payload: MusicGroupLoopSetRequest = {
-      requestId: generateRequestId(),
-      enabled,
-    }
-    ServerSocketService.Connection.emit('musicGroupLoopSetRequest', payload)
-  }
-
   const beginGroupedBpmEdit = (): void => {
     if (!isGrouped || isBpmSliderDisabled || bpmSliderInteractionActiveRef.current) {
       return
@@ -681,24 +664,12 @@ function App() {
     const localStartTimeMs = payload.scheduledStartTimeMs + serverClockOffsetMsRef.current
     const rawDelayMs = localStartTimeMs - Date.now()
     const delayMs = Math.max(0, rawDelayMs)
-    const activeSchedule = activeGroupedScheduleRef.current
-    const shouldQueueWhileCurrentRuns =
-      rawDelayMs > 0 &&
-      !!activeSchedule &&
-      activeSchedule.groupId === payload.groupId &&
-      activeSchedule.columnIndex === payload.columnIndex &&
-      activeSchedule.scheduleToken !== payload.scheduleToken
 
     // Keep only one local pending start timer/token at a time. Newer server
     // schedules supersede older ones if they target this same device column.
     clearPendingGroupedStart()
 
-    // In a single-column loop, the server pre-arms the next cycle using the
-    // same column index. Keep the current cycle running until the scheduled
-    // handoff time instead of pausing immediately.
-    if (!shouldQueueWhileCurrentRuns) {
-      stopTransportPlayback(false)
-    }
+    stopTransportPlayback(false)
 
     console.log('shared playback start received', {
       groupId: payload.groupId,
@@ -895,12 +866,6 @@ function App() {
   }
 
   const handleLoopToggle = (): void => {
-    if (isGrouped) {
-      // Shared loop mode lives in group session state on the server.
-      emitGroupedLoopSetRequest(!loopEnabled)
-      return
-    }
-
     setLoopEnabledLocal((previous) => !previous)
   }
 
@@ -1172,30 +1137,6 @@ function App() {
       handleGroupedReset(payload)
     }
 
-    const onMusicGroupLoopState = (payload: MusicGroupLoopStatePayload): void => {
-      setMusicGroupState((previous) => {
-        if (!previous) {
-          return previous
-        }
-
-        const nextGroups = previous.groups.map((group) => {
-          if (group.id !== payload.groupId) {
-            return group
-          }
-
-          return {
-            ...group,
-            loopEnabled: payload.enabled,
-          }
-        })
-
-        return {
-          ...previous,
-          groups: nextGroups,
-        }
-      })
-    }
-
     const onMusicGroupBpmState = (payload: MusicGroupBpmStatePayload): void => {
       setMusicGroupState((previous) => {
         if (!previous) {
@@ -1286,7 +1227,6 @@ function App() {
     ServerSocketService.Connection.on('musicGroupPaused', onMusicGroupPaused)
     ServerSocketService.Connection.on('musicGroupCancelScheduledStart', onMusicGroupCancelScheduledStart)
     ServerSocketService.Connection.on('musicGroupReset', onMusicGroupReset)
-    ServerSocketService.Connection.on('musicGroupLoopState', onMusicGroupLoopState)
     ServerSocketService.Connection.on('musicGroupBpmState', onMusicGroupBpmState)
     ServerSocketService.Connection.on('pourTransferResolved', onPourTransferResolved)
     ServerSocketService.Connection.on('connectedToServer', onConnectedToServer)
@@ -1338,7 +1278,6 @@ function App() {
       ServerSocketService.Connection.off('musicGroupPaused', onMusicGroupPaused)
       ServerSocketService.Connection.off('musicGroupCancelScheduledStart', onMusicGroupCancelScheduledStart)
       ServerSocketService.Connection.off('musicGroupReset', onMusicGroupReset)
-      ServerSocketService.Connection.off('musicGroupLoopState', onMusicGroupLoopState)
       ServerSocketService.Connection.off('musicGroupBpmState', onMusicGroupBpmState)
       ServerSocketService.Connection.off('pourTransferResolved', onPourTransferResolved)
       ServerSocketService.Connection.off('connectedToServer', onConnectedToServer)
@@ -1375,15 +1314,6 @@ function App() {
     //Composition is playing
     if (playback === 1) {
       const handleLocalPlaybackComplete = (): void => {
-        if (loopEnabledLocalRef.current) {
-          // Solo loop mode is purely local and restarts immediately at bar start.
-          progressRef.current = 0
-          void startTransportPlayback(playbackBpm, 0, handleLocalPlaybackComplete).catch((error: unknown) => {
-            console.error('Failed to restart local loop playback', error)
-          })
-          return
-        }
-
         progressRef.current = 0
         setPlayback('stop')
       }

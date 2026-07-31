@@ -13,8 +13,6 @@ import {
     MusicGroupClockSyncResponse,
     MusicGroupColumnFinishedPayload,
     MusicGroupColumnScheduledPayload,
-    MusicGroupLoopSetRequest,
-    MusicGroupLoopStatePayload,
     MusicGroupPauseCapturePayload,
     MusicGroupPauseReportPayload,
     MusicGroupPausedPayload,
@@ -37,8 +35,6 @@ interface GroupPlaybackSession {
     sharedBpm: number;
     bpmEditOwnerDeviceId: string | null;
     bpmStateSequence: number;
-    loopEnabled: boolean;
-    loopStateSequence: number;
     status: GroupPlaybackStatus;
     activeColumnIndex: number;
     activeScheduleToken: number;
@@ -194,9 +190,6 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         });
         client.clientSocket.on('musicGroupStopRequest', (payload: MusicGroupPlaybackCommand) => {
             this.handleMusicGroupStopRequest(client, payload);
-        });
-        client.clientSocket.on('musicGroupLoopSetRequest', (payload: MusicGroupLoopSetRequest) => {
-            this.handleMusicGroupLoopSetRequest(client, payload);
         });
         client.clientSocket.on('musicGroupBpmEditBeginRequest', (payload: MusicGroupBpmEditBeginRequest) => {
             this.handleMusicGroupBpmEditBeginRequest(client, payload);
@@ -634,52 +627,6 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         this.stopGroupPlayback(group, 'stop');
     }
 
-    private handleMusicGroupLoopSetRequest(
-        client: MusicClientSocketService,
-        payload: MusicGroupLoopSetRequest
-    ): void {
-        const group = client.device.musicGroup;
-        if (!group) {
-            return;
-        }
-
-        const session = this.getOrCreateGroupPlaybackSession(group);
-        if (session.loopEnabled === payload.enabled) {
-            // Idempotent request: still echo the effective room loop state so
-            // late or reconnecting clients can converge without extra logic.
-            this.emitGroupLoopState(group, session);
-            return;
-        }
-
-        session.loopEnabled = payload.enabled;
-        session.loopStateSequence += 1;
-
-        if (
-            payload.enabled &&
-            session.status === 'playing' &&
-            session.lastScheduledStartTimeMs !== null
-        ) {
-            // If loop is turned on while already playing, pre-arm the next
-            // handoff right away so there is no gap at end of cycle.
-            this.armFollowingColumn(group, session, session.activeColumnIndex, session.lastScheduledStartTimeMs);
-        }
-
-        if (
-            !payload.enabled &&
-            session.status === 'playing' &&
-            group.devices.length > 0 &&
-            session.activeColumnIndex === group.devices.length - 1 &&
-            session.pendingNextColumnIndex === 0
-        ) {
-            // If loop is turned off while currently on the last natural column,
-            // cancel only the wrapped pre-armed start.
-            this.cancelPendingNextSchedule(group, session, 'stop');
-        }
-
-        this.emitGroupLoopState(group, session);
-        this.emitMusicGroupState();
-    }
-
     private handleMusicGroupBpmEditBeginRequest(
         client: MusicClientSocketService,
         _payload: MusicGroupBpmEditBeginRequest
@@ -814,7 +761,7 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         const hasNaturalNextColumn = nextColumnIndex < group.devices.length;
         const expectedNextColumnIndex = hasNaturalNextColumn ? nextColumnIndex : 0;
 
-        if (!hasNaturalNextColumn && !session.loopEnabled) {
+        if (!hasNaturalNextColumn) {
             this.stopGroupPlayback(group, 'naturalEnd');
             return;
         }
@@ -834,7 +781,7 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
             session.pendingNextScheduleToken = null;
             session.pendingNextStartTimeMs = null;
 
-            this.armFollowingColumn(group, session, expectedNextColumnIndex, session.lastScheduledStartTimeMs);
+            this.armFollowingColumn(group, session, expectedNextColumnIndex, session.lastScheduledStartTimeMs, 0);
             return;
         }
 
@@ -851,8 +798,6 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
             sharedBpm: MUSIC_GROUP_SHARED_BPM,
             bpmEditOwnerDeviceId: null,
             bpmStateSequence: 0,
-            loopEnabled: false,
-            loopStateSequence: 0,
             status: 'idle',
             activeColumnIndex: 0,
             activeScheduleToken: 0,
@@ -907,7 +852,7 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
 
         this.emitMusicGroupState();
 
-        this.armFollowingColumn(group, session, columnIndex, session.lastScheduledStartTimeMs);
+        this.armFollowingColumn(group, session, columnIndex, session.lastScheduledStartTimeMs, resumePositionMs);
     }
 
     private stopGroupPlayback(group: MusicGroup, reason: MusicGroupResetReason): void {
@@ -1002,13 +947,12 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         group: MusicGroup,
         session: GroupPlaybackSession,
         currentColumnIndex: number,
-        currentStartTimeMs: number | null
+        currentStartTimeMs: number | null,
+        resumePositionMs: number = 0
     ): void {
         const naturalNextColumnIndex = currentColumnIndex + 1;
         const hasNaturalNextColumn = naturalNextColumnIndex < group.devices.length;
-        const nextColumnIndex = hasNaturalNextColumn
-            ? naturalNextColumnIndex
-            : (session.loopEnabled ? 0 : -1);
+        const nextColumnIndex = hasNaturalNextColumn ? naturalNextColumnIndex : -1;
 
         if (!currentStartTimeMs || nextColumnIndex < 0) {
             return;
@@ -1044,8 +988,6 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
             sharedBpm: session.sharedBpm,
         };
 
-        // Broadcast pre-armed schedule to every member. Only the column that
-        // matches each device position executes audio; others track shared state.
         this.emitToGroup(group, 'musicGroupColumnScheduled', nextPayload);
     }
 
@@ -1064,16 +1006,6 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
 
             this.releaseGroupBpmEditLock(group, session);
         });
-    }
-
-    private emitGroupLoopState(group: MusicGroup, session: GroupPlaybackSession): void {
-        const payload: MusicGroupLoopStatePayload = {
-            groupId: group.id,
-            enabled: session.loopEnabled,
-            sequence: session.loopStateSequence,
-        };
-
-        this.emitToGroup(group, 'musicGroupLoopState', payload);
     }
 
     private clearPourCoordinationState(): void {
@@ -1318,7 +1250,6 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
                 sharedBpm: session.sharedBpm,
                 bpmEditOwnerDeviceId: session.bpmEditOwnerDeviceId,
                 playbackStatus: session.status,
-                loopEnabled: session.loopEnabled,
             };
         });
 
