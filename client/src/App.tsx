@@ -20,6 +20,7 @@ import {
   MusicGroupClockSyncResponse,
   MusicGroupColumnFinishedPayload,
   MusicGroupColumnScheduledPayload,
+  MusicGroupLoopSetRequest,
   MusicGroupPauseCapturePayload,
   MusicGroupPauseReportPayload,
   MusicGroupPausedPayload,
@@ -150,6 +151,8 @@ function App() {
   const bestClockSyncRttMsRef = useRef<number | null>(null)
   const pendingGroupedStartTimerRef = useRef<number | null>(null)
   const pendingGroupedStartTokenRef = useRef<number | null>(null)
+  const pendingGroupedStartAtMsRef = useRef<number | null>(null)
+  const queuedGroupedStartRef = useRef<MusicGroupColumnScheduledPayload | null>(null)
   const activeGroupedScheduleRef = useRef<ActiveGroupedSchedule | null>(null)
   const waitingForInitialGroupClockSyncRef = useRef<boolean>(false)
   const initialGroupedPlayFallbackTimerRef = useRef<number | null>(null)
@@ -185,6 +188,9 @@ function App() {
   const octaveTiltAnalyzerRef = useRef<OctaveChangeTiltAnalyzer | null>(null)
   
   const groupCommandPendingRef = useRef<GroupControlCommand | null>(null)
+  const loopEnabledLocalRef = useRef<boolean>(false)
+  const groupedLoopEnabledRef = useRef<boolean>(false)
+  const isOneColumnGroupRef = useRef<boolean>(false)
 
   const { constructComposition } = useSamplerTransport({
     instrumentRef,
@@ -263,7 +269,8 @@ function App() {
   )
   const isPlaybackActive = playback === 1
   const playbackBpm = currentGroup?.sharedBpm ?? bpm
-  const loopEnabled = loopEnabledLocal
+  const loopEnabled = isGrouped ? (currentGroup?.loopEnabled ?? false) : loopEnabledLocal
+  const isOneColumnGroup = isGrouped ? (currentGroup?.isOneColumnGroup ?? false) : false
   const isBpmLockedByPeer = isGrouped
     && !!currentGroup?.bpmEditOwnerDeviceId
     && currentGroup.bpmEditOwnerDeviceId !== selfDeviceId
@@ -272,6 +279,15 @@ function App() {
   useEffect(() => {
     selfDeviceIdRef.current = selfDeviceId
   }, [selfDeviceId])
+
+  useEffect(() => {
+    loopEnabledLocalRef.current = loopEnabledLocal
+  }, [loopEnabledLocal])
+
+  useEffect(() => {
+    groupedLoopEnabledRef.current = isGrouped ? (currentGroup?.loopEnabled ?? false) : false
+    isOneColumnGroupRef.current = isOneColumnGroup
+  }, [currentGroup, isGrouped, isOneColumnGroup])
 
   useEffect(() => {
     hasSnappedNeighborRef.current = isSnappedWithAnotherDevice
@@ -382,6 +398,8 @@ function App() {
     }
 
     pendingGroupedStartTokenRef.current = null
+    pendingGroupedStartAtMsRef.current = null
+    queuedGroupedStartRef.current = null
   }
 
   const clearGroupCommandPending = (): void => {
@@ -573,6 +591,14 @@ function App() {
     ServerSocketService.Connection.emit(eventName, payload)
   }
 
+  const emitGroupedLoopSetRequest = (enabled: boolean): void => {
+    const payload: MusicGroupLoopSetRequest = {
+      requestId: generateRequestId(),
+      enabled,
+    }
+    ServerSocketService.Connection.emit('musicGroupLoopSetRequest', payload)
+  }
+
   const beginGroupedBpmEdit = (): void => {
     if (!isGrouped || isBpmSliderDisabled || bpmSliderInteractionActiveRef.current) {
       return
@@ -623,9 +649,19 @@ function App() {
     setBPM(nextBpm)
   }
 
-  const handleGroupedColumnFinished = (): void => {
+  const handleGroupedTransportComplete = (): void => {
     const schedule = activeGroupedScheduleRef.current
     if (!schedule) {
+      return
+    }
+
+    if (isGroupedRef.current && isOneColumnGroupRef.current && groupedLoopEnabledRef.current) {
+      progressRef.current = 0
+      stopTransportPlayback(false)
+
+      void startTransportPlayback(schedule.sharedBpm, 0, handleGroupedTransportComplete).catch((error: unknown) => {
+        console.error('Failed to restart grouped single-column loop playback', error)
+      })
       return
     }
 
@@ -664,12 +700,40 @@ function App() {
     const localStartTimeMs = payload.scheduledStartTimeMs + serverClockOffsetMsRef.current
     const rawDelayMs = localStartTimeMs - Date.now()
     const delayMs = Math.max(0, rawDelayMs)
+    const incomingStartTimeMs = payload.scheduledStartTimeMs
+    const activeSchedule = activeGroupedScheduleRef.current
+    const shouldQueueWhileCurrentRuns =
+      rawDelayMs > 0 &&
+      !!activeSchedule &&
+      activeSchedule.groupId === payload.groupId &&
+      activeSchedule.columnIndex === payload.columnIndex &&
+      activeSchedule.scheduleToken !== payload.scheduleToken
+
+    const pendingToken = pendingGroupedStartTokenRef.current
+    const pendingStartAtMs = pendingGroupedStartAtMsRef.current
+    const nowMs = Date.now()
+    const hasFuturePendingStart =
+      pendingToken !== null &&
+      pendingStartAtMs !== null &&
+      pendingStartAtMs > nowMs
+
+    const shouldKeepExistingPendingStart =
+      hasFuturePendingStart &&
+      pendingStartAtMs <= incomingStartTimeMs &&
+      pendingToken !== payload.scheduleToken
+
+    if (shouldKeepExistingPendingStart) {
+      queuedGroupedStartRef.current = payload
+      return
+    }
 
     // Keep only one local pending start timer/token at a time. Newer server
     // schedules supersede older ones if they target this same device column.
     clearPendingGroupedStart()
 
-    stopTransportPlayback(false)
+    if (!shouldQueueWhileCurrentRuns) {
+      stopTransportPlayback(false)
+    }
 
     console.log('shared playback start received', {
       groupId: payload.groupId,
@@ -683,6 +747,7 @@ function App() {
     })
 
     pendingGroupedStartTokenRef.current = payload.scheduleToken
+  pendingGroupedStartAtMsRef.current = incomingStartTimeMs
     // Record pending token for debug visibility. Active schedule is updated only
     // when the local handoff time is reached.
     syncGroupPlaybackDebugSnapshot({ scheduleToken: payload.scheduleToken })
@@ -694,6 +759,7 @@ function App() {
 
       pendingGroupedStartTimerRef.current = null
       pendingGroupedStartTokenRef.current = null
+      pendingGroupedStartAtMsRef.current = null
       progressRef.current = nextProgress
       // Token ownership moves from pending -> active exactly at local start,
       // which prevents early token replacement during pre-armed loop cycles.
@@ -708,9 +774,15 @@ function App() {
         columnIndex: payload.columnIndex,
         scheduleToken: payload.scheduleToken,
       })
-      void startTransportPlayback(payload.sharedBpm, nextProgress, handleGroupedColumnFinished).catch((error: unknown) => {
+      void startTransportPlayback(payload.sharedBpm, nextProgress, handleGroupedTransportComplete).catch((error: unknown) => {
         console.error('Failed to start shared playback', error)
       })
+
+      const queuedStart = queuedGroupedStartRef.current
+      if (queuedStart && queuedStart.scheduleToken !== payload.scheduleToken) {
+        queuedGroupedStartRef.current = null
+        handleGroupedScheduledColumn(queuedStart)
+      }
     }
 
     if (delayMs === 0) {
@@ -724,12 +796,16 @@ function App() {
   const handleGroupedPauseCapture = (payload: MusicGroupPauseCapturePayload): void => {
     const selfContext = selfGroupContextRef.current
     const activeSchedule = activeGroupedScheduleRef.current
+    const isMatchingActiveSchedule =
+      !!activeSchedule &&
+      activeSchedule.scheduleToken === payload.scheduleToken
+    const isMatchingPendingSchedule =
+      pendingGroupedStartTokenRef.current === payload.scheduleToken
 
     if (
       payload.groupId !== selfContext.groupId ||
       selfContext.columnIndex !== payload.columnIndex ||
-      !activeSchedule ||
-      activeSchedule.scheduleToken !== payload.scheduleToken
+      (!isMatchingActiveSchedule && !isMatchingPendingSchedule)
     ) {
       return
     }
@@ -740,7 +816,8 @@ function App() {
 
     // The active column reports progress in ms so the server can rebroadcast
     // one authoritative paused cursor for every client in the group.
-    const totalMs = getCompositionDurationMs(activeSchedule.sharedBpm)
+    const sharedBpm = activeSchedule?.sharedBpm ?? selfContext.sharedBpm ?? MUSIC_GROUP_SHARED_BPM
+    const totalMs = getCompositionDurationMs(sharedBpm)
     const pausedPositionMs = Math.round(progressRef.current * totalMs)
     const reportPayload: MusicGroupPauseReportPayload = {
       groupId: payload.groupId,
@@ -866,6 +943,11 @@ function App() {
   }
 
   const handleLoopToggle = (): void => {
+    if (isGrouped) {
+      emitGroupedLoopSetRequest(!loopEnabled)
+      return
+    }
+
     setLoopEnabledLocal((previous) => !previous)
   }
 
@@ -1314,6 +1396,14 @@ function App() {
     //Composition is playing
     if (playback === 1) {
       const handleLocalPlaybackComplete = (): void => {
+        if (loopEnabledLocalRef.current) {
+          progressRef.current = 0
+          void startTransportPlayback(playbackBpm, 0, handleLocalPlaybackComplete).catch((error: unknown) => {
+            console.error('Failed to restart local loop playback', error)
+          })
+          return
+        }
+
         progressRef.current = 0
         setPlayback('stop')
       }
