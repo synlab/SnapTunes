@@ -18,6 +18,14 @@ interface CompositionUpdateContextValue {
   setComposition: Dispatch<SetStateAction<Note[]>>
 }
 
+interface CompositionHistoryContextValue {
+  compositionHistory: Note[][]
+}
+
+interface CompositionHistoryUpdateContextValue {
+  setCompositionHistory: Dispatch<SetStateAction<Note[][]>>
+}
+
 //Composition of the percussion instruments (drums)
 interface DrumsCompostionContextValue {
   drumsComposition: Note[] //Maybe not the same kind of note ? 
@@ -105,6 +113,9 @@ const UpdatePlaybackContext = createContext<PlaybackUpdateContextValue | undefin
 const CompositionContext = createContext<CompostionContextValue | undefined>(undefined)
 const UpdateCompositionContext = createContext<CompositionUpdateContextValue | undefined>(undefined)
 
+const CompositionHistoryContext = createContext<CompositionHistoryContextValue | undefined>(undefined)
+const UpdateCompositionHistoryContext = createContext<CompositionHistoryUpdateContextValue | undefined>(undefined)
+
 const DrumsCompositionContext = createContext<DrumsCompostionContextValue | undefined>(undefined)
 const UpdateDrumsCompositionContext = createContext<DrumsCompositionUpdateContextValue | undefined>(undefined)
 
@@ -151,11 +162,16 @@ export const PlaybackContextProvider = ({ children }: ProviderProps) => {
 
 export const CompositionContextProvider = ({ children }: ProviderProps) => {
   const [composition, setComposition] = useState<Note[]>([])
+  const [compositionHistory, setCompositionHistory] = useState<Note[][]>([])
 
   return (
     <CompositionContext.Provider value={{ composition }}>
       <UpdateCompositionContext.Provider value={{ setComposition }}>
-        {children}
+        <CompositionHistoryContext.Provider value={{ compositionHistory }}>
+          <UpdateCompositionHistoryContext.Provider value={{ setCompositionHistory }}>
+            {children}
+          </UpdateCompositionHistoryContext.Provider>
+        </CompositionHistoryContext.Provider>
       </UpdateCompositionContext.Provider>
     </CompositionContext.Provider>
   )
@@ -275,6 +291,12 @@ export const useComposition = (): CompostionContextValue =>
 
 export const useUpdateComposition = (): CompositionUpdateContextValue =>
   useRequiredContext(useContext(UpdateCompositionContext), 'Composition Update Error')
+
+export const useCompositionHistory = (): CompositionHistoryContextValue =>
+  useRequiredContext(useContext(CompositionHistoryContext), 'Composition History Error')
+
+export const useUpdateCompositionHistory = (): CompositionHistoryUpdateContextValue =>
+  useRequiredContext(useContext(UpdateCompositionHistoryContext), 'Composition History Update Error')
 
 //Drums composition
 export const useDrumsComposition = (): DrumsCompostionContextValue =>

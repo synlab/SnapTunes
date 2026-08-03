@@ -97,6 +97,8 @@ export function NoteSpace({ progressRef, playbackState }: NoteSpaceProps) {
   const { setUndo } = ctx.useUpdateUndo()
   const { composition } = ctx.useComposition()
   const { setComposition } = ctx.useUpdateComposition()
+  const { compositionHistory } = ctx.useCompositionHistory()
+  const { setCompositionHistory } = ctx.useUpdateCompositionHistory()
   const { octave } = ctx.useOctave()
   const { instrument } = ctx.useInstrument()
 
@@ -127,7 +129,7 @@ export function NoteSpace({ progressRef, playbackState }: NoteSpaceProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const p5Ref = useRef<P5Instance | null>(null)
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const historyRef = useRef<Note[][]>([]) // History of compositions for undo functionality
+  const historyRef = useRef<Note[][]>(compositionHistory) // History of compositions for undo functionality
 
   // Refs to sync context state with p5 sketch without remounting
   const drawStateRef = useRef<boolean>(drawState)
@@ -158,13 +160,19 @@ export function NoteSpace({ progressRef, playbackState }: NoteSpaceProps) {
   }, [composition])
 
   useEffect(() => {
+    return () => {
+      setCompositionHistory(historyRef.current) // Save the history to context when the component unmounts
+    }
+  }, [historyRef, setCompositionHistory])
+
+  useEffect(() => {
     playbackStateRef.current = playbackState
   }, [playbackState])
 
   useEffect(() => {
     // Cancel selection on any snap/unsnap gesture
     selectedNoteRef.current = null
-
+    if(lastCompositionUpdateTime === 0 || lastTimeSnapOrUnsnapContext === 0) return // Skip undo check on initial render
     const difference = Math.abs(lastCompositionUpdateTime - lastTimeSnapOrUnsnapContext)
     if (difference < 50) {
       setUndo(true)
@@ -615,6 +623,7 @@ export function NoteSpace({ progressRef, playbackState }: NoteSpaceProps) {
           // Accept out-of-band composition updates (e.g. socket transfer merges)
           // so the sketch reflects shared-state changes immediately.
           compositionTemp = latestCompositionFromContext
+          
           if (sketchSelectedNote) {
             sketchSelectedNote = null
             selectedNoteRef.current = null
@@ -647,7 +656,9 @@ export function NoteSpace({ progressRef, playbackState }: NoteSpaceProps) {
           sketchSelectedNote = null
           selectedNoteRef.current = null
           clearDragAndDropState()
+          undoRef.current = false
           setUndo(false)
+          
         }
 
         if (!drawStateRef.current) {
