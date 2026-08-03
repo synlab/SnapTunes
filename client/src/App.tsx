@@ -319,6 +319,7 @@ function App() {
     instrumentRef.current = instrument
   }, [instrument])
 
+  // Stop playback if the instrument changes while playing, to avoid playing the wrong instrument's sound.
   useEffect(() => {
     const previousInstrument = previousInstrumentRef.current
     previousInstrumentRef.current = instrument
@@ -326,7 +327,6 @@ function App() {
     if (previousInstrument === instrument) {
       return
     }
-
     pausePlaybackSoloOrIfCurrentlyPlayingGroupPart()
 
   }, [instrument, setPlayback])
@@ -1177,7 +1177,7 @@ function App() {
     const onShake = (data: MovementManagerDeviceEvent): void => {
       console.log(`🫨 Shake event received from device ${data.device.id.value}`);
 
-      // Pause ongoing progression before clearing when shake-to-remove is triggered.
+      // Pause ongoing progression before clearing when shake-to-remove is triggered and the device is playing.
       pausePlaybackSoloOrIfCurrentlyPlayingGroupPart()
 
       const activeInstrument = instrumentRef.current
@@ -1306,6 +1306,8 @@ function App() {
         }
 
         mergeIncomingTransferredCompositions(payload)
+        // Pause playback if the receiver is currently playing.
+        pausePlaybackSoloOrIfCurrentlyPlayingGroupPart()
       }
     }
 
