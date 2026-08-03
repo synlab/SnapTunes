@@ -37,7 +37,7 @@ import { MovementManagerDeviceEvent } from 'simsnap-core/src/entities/VirtualRoo
 import { type CompletedInteraction } from './app/services/TiltAnalyzerService'
 import { OctaveChangeTiltAnalyzer } from './app/services/OctaveChangeTiltAnalyzer'
 import { PourToCopyPasteTiltAnalyzer } from './app/services/PourToCopyPasteTiltAnalyzer'
-import tiltBackGif from './assets/tilt_back_octave.gif'; 
+import tiltBackGif from './assets/tilt_back_octave.gif';
 
 //For visualizing snap borders between devices
 interface SnapBorder {
@@ -158,6 +158,7 @@ function App() {
   const initialGroupedPlayFallbackTimerRef = useRef<number | null>(null)
   const lastGroupTopologySignatureRef = useRef<string | null>(null)
   const selfDeviceIdRef = useRef<string | null>(null)
+  const previousInstrumentRef = useRef<Instrument | null>(instrument)
   const pastedFromDirectionTimerRef = useRef<number | null>(null)
   const hasSnappedNeighborRef = useRef<boolean>(false)
   const bpmSliderInteractionActiveRef = useRef<boolean>(false)
@@ -177,16 +178,16 @@ function App() {
     serverClockOffsetMs: 0,
   })
   const [tiltDebugSnapshot, setTiltDebugSnapshot] = useState<ReturnType<OctaveChangeTiltAnalyzer['getDebugSnapshot']> | null>(null)
-  
+
   // Refs and state for managing the pour-to-copy/paste interaction
   const pourToCopyTiltAnalyzerRef = useRef<PourToCopyPasteTiltAnalyzer | null>(null)
   const groupCommandTimeoutRef = useRef<number | null>(null)
   const [pourAttemptDirection, setPourAttemptDirection] = useState<'left' | 'right' | null>(null)
   const [pastedFromDirection, setPastedFromDirection] = useState<'left' | 'right' | null>(null)
-  
+
   // Refs and state for managing the octave change interaction
   const octaveTiltAnalyzerRef = useRef<OctaveChangeTiltAnalyzer | null>(null)
-  
+
   const groupCommandPendingRef = useRef<GroupControlCommand | null>(null)
   const loopEnabledLocalRef = useRef<boolean>(false)
   const groupedLoopEnabledRef = useRef<boolean>(false)
@@ -274,7 +275,20 @@ function App() {
   const isBpmLockedByPeer = isGrouped
     && !!currentGroup?.bpmEditOwnerDeviceId
     && currentGroup.bpmEditOwnerDeviceId !== selfDeviceId
-  const isBpmSliderDisabled = isPlaybackActive || isBpmLockedByPeer 
+  const isBpmSliderDisabled = isPlaybackActive || isBpmLockedByPeer
+
+  const isSupposedlyPlayingGroupedPart = (): boolean => {
+    const activeSchedule = activeGroupedScheduleRef.current
+
+    return Boolean(
+      isGroupedRef.current &&
+      playbackRef.current === 1 &&
+      animFrameRef.current !== null &&
+      activeSchedule &&
+      activeSchedule.groupId === selfGroupContextRef.current.groupId &&
+      activeSchedule.columnIndex === selfGroupContextRef.current.columnIndex
+    )
+  }
 
   useEffect(() => {
     selfDeviceIdRef.current = selfDeviceId
@@ -304,6 +318,18 @@ function App() {
   useEffect(() => {
     instrumentRef.current = instrument
   }, [instrument])
+
+  useEffect(() => {
+    const previousInstrument = previousInstrumentRef.current
+    previousInstrumentRef.current = instrument
+
+    if (previousInstrument === instrument) {
+      return
+    }
+
+    pausePlaybackSoloOrIfCurrentlyPlayingGroupPart()
+
+  }, [instrument, setPlayback])
 
   useEffect(() => {
     playbackRef.current = playback
@@ -480,6 +506,17 @@ function App() {
     Tone.getTransport().position = 0
     Tone.getTransport().cancel()
   }
+  
+  const pausePlaybackSoloOrIfCurrentlyPlayingGroupPart = (): void => {
+    if (isSupposedlyPlayingGroupedPart()) {
+      if (!groupCommandPendingRef.current) {
+        markGroupCommandPending('pause')
+        emitGroupedPlaybackCommand('musicGroupPauseRequest')
+      }
+    } else if (!isGroupedRef.current && playbackRef.current === 1) {
+      setPlayback(2)
+    }
+  }
 
   const syncGroupPlaybackDebugSnapshot = (overrides: Partial<GroupPlaybackDebugSnapshot> = {}): void => {
     if (!SHOW_DEBUG_OVERLAY.group) {
@@ -585,6 +622,8 @@ function App() {
       initialGroupedPlayFallbackTimerRef.current = null
     }
   }
+
+
 
   const emitGroupedPlaybackCommand = (eventName: string): void => {
     const payload: MusicGroupPlaybackCommand = { requestId: generateRequestId() }
@@ -747,7 +786,7 @@ function App() {
     })
 
     pendingGroupedStartTokenRef.current = payload.scheduleToken
-  pendingGroupedStartAtMsRef.current = incomingStartTimeMs
+    pendingGroupedStartAtMsRef.current = incomingStartTimeMs
     // Record pending token for debug visibility. Active schedule is updated only
     // when the local handoff time is reached.
     syncGroupPlaybackDebugSnapshot({ scheduleToken: payload.scheduleToken })
@@ -893,7 +932,7 @@ function App() {
     await ensureAudioContextRunning()
 
     if (isGrouped) {
-      if (playback === 1) {
+      if (isPlaybackActive) {
         markGroupCommandPending('pause')
         emitGroupedPlaybackCommand('musicGroupPauseRequest')
         return
@@ -924,7 +963,7 @@ function App() {
       return
     }
 
-    if (playback === 1) setPlayback(2)
+    if (isPlaybackActive) setPlayback(2)
     else setPlayback(1)
   }
 
@@ -990,8 +1029,8 @@ function App() {
       processTiltEvent(event)
 
       // For visual feedback only
-      setPourAttemptDirection(pourToCopyTiltAnalyzerRef.current?.isPouringRight()? 'right' : pourToCopyTiltAnalyzerRef.current?.isPouringLeft()? 'left' : null)
-      
+      setPourAttemptDirection(pourToCopyTiltAnalyzerRef.current?.isPouringRight() ? 'right' : pourToCopyTiltAnalyzerRef.current?.isPouringLeft() ? 'left' : null)
+
     }
 
     window.addEventListener('deviceorientation', handleDeviceOrientation)
@@ -1139,14 +1178,7 @@ function App() {
       console.log(`🫨 Shake event received from device ${data.device.id.value}`);
 
       // Pause ongoing progression before clearing when shake-to-remove is triggered.
-      if (isGroupedRef.current) {
-        if (playbackRef.current === 1 && !groupCommandPendingRef.current) {
-          markGroupCommandPending('pause')
-          emitGroupedPlaybackCommand('musicGroupPauseRequest')
-        }
-      } else if (playbackRef.current === 1) {
-        setPlayback(2)
-      }
+      pausePlaybackSoloOrIfCurrentlyPlayingGroupPart()
 
       const activeInstrument = instrumentRef.current
       // Emit a targeted clear event for the currently active instrument family.
