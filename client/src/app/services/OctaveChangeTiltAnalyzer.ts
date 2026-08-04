@@ -117,8 +117,10 @@ export class OctaveChangeTiltAnalyzer extends TiltAnalyzer {
     }
 
     private isTargetSample(record: DeviceOrientationRecord, gestureType: GestureMachine['type']): boolean {
-        const targetGamma = gestureType === 'octaveChangeUp' ? -35 : 40
-        return this.isWithinTolerance(record.gamma, targetGamma, 15)
+        const targetGamma = gestureType === 'octaveChangeUp' ? -40 : 35
+        //The downward movement depends on each person's wrist flexibility, which is why we increase the tolerance range
+        const toleranceRange = gestureType === 'octaveChangeUp' ? 15 : 30
+        return this.isWithinTolerance(record.gamma, targetGamma, toleranceRange)
     }
 
     private resetMachine(machine: GestureMachine): void {
