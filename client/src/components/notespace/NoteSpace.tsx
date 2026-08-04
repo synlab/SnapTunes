@@ -658,7 +658,6 @@ export function NoteSpace({ progressRef, playbackState }: NoteSpaceProps) {
           clearDragAndDropState()
           undoRef.current = false
           setUndo(false)
-          
         }
 
         if (!drawStateRef.current) {

@@ -123,6 +123,7 @@ function App() {
   const { octave } = ctx.useOctave()
   const { setOctave } = ctx.useUpdateOctave()
   const { requestClear } = ctx.useUpdateClear();
+  const { undo } = ctx.useUndo();
 
   // Context for tracking the last time a snap or unsnap event occurred, used to determine if an undo should be triggered after such events.
   const { setlastTimeSnapOrUnsnapContext } = simsnapctx.useUpdateLastTimeSnapOrUnsnapContext()
@@ -1477,7 +1478,7 @@ function App() {
     >
 
       <ctx.DrawStateContextProvider>
-        <ctx.UndoContextProvider>
+        
           <ctx.SFXContextProvider>
             <TopBar
               volume={volume}
@@ -1496,7 +1497,6 @@ function App() {
             {instrument === Instrument.Drums ? <DrumSpace progressRef={progressRef} /> : <NoteSpace progressRef={progressRef} playbackState={playback} />}
 
           </ctx.SFXContextProvider>
-        </ctx.UndoContextProvider>
       </ctx.DrawStateContextProvider>
 
       {connectedToServer && snapBorders.map((border) => (

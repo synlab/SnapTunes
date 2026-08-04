@@ -22,7 +22,9 @@ createRoot(rootElement).render(
             <ctx.InstrumentContextProvider>
               <ctx.OctaveContextProvider>
                 <ctx.ClearContextProvider>
-                  <App />
+                  <ctx.UndoContextProvider>
+                    <App />
+                  </ctx.UndoContextProvider>
                 </ctx.ClearContextProvider>
               </ctx.OctaveContextProvider>
             </ctx.InstrumentContextProvider>
