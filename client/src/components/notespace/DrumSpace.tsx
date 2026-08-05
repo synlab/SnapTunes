@@ -113,7 +113,6 @@ export function DrumSpace({ progressRef }: DrumSpaceProps) {
         }
       }
     }
-    console.log(newComposition)
     setDrumsComposition(newComposition);
   }, [grid])
 

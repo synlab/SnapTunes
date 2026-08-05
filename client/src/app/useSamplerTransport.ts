@@ -113,15 +113,12 @@ export function useSamplerTransport({
   const constructComposition = (totalDuration: number) => {
     Tone.getTransport().cancel()
     const activeInstrument = instrumentRef.current ?? Instrument.Piano
-    console.log('current instrument' + activeInstrument)
     const selectedComposition: Note[] =
       activeInstrument === Instrument.Drums ? drumsCompositionRef.current : compositionRef.current
 
     selectedComposition.forEach((note: Note) => {
       const startTimeSec = note.startTime * totalDuration
       const durationSec = note.duration * totalDuration
-      console.log(note.pitch + ': start =' + startTimeSec + ', duration =' + durationSec)
-
       Tone.getTransport().schedule((time) => {
         const sampler = samplersRef.current[activeInstrument]
         if (!sampler) {

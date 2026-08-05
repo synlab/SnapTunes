@@ -777,17 +777,6 @@ function App() {
       stopTransportPlayback(false)
     }
 
-    console.log('shared playback start received', {
-      groupId: payload.groupId,
-      columnIndex: payload.columnIndex,
-      scheduleToken: payload.scheduleToken,
-      scheduledStartTimeMs: payload.scheduledStartTimeMs,
-      localStartTimeMs,
-      rawDelayMs,
-      delayMs,
-      serverClockOffsetMs: serverClockOffsetMsRef.current,
-    })
-
     pendingGroupedStartTokenRef.current = payload.scheduleToken
     pendingGroupedStartAtMsRef.current = incomingStartTimeMs
     // Record pending token for debug visibility. Active schedule is updated only
@@ -1057,13 +1046,11 @@ function App() {
       const z = 1;
 
       // Send individual acceleration data to server for shake detection
-      // console.log(`📱 Sending deviceMotion:`, { x: x, y: y, z: z });
       ServerSocketService.emit('acceleration', { x, y, z });
     };
 
     if (permissionGranted) {
       window.addEventListener('devicemotion', handleDeviceAcceleration);
-      console.log('Device motion listener added');
     }
 
     return () => {
@@ -1212,16 +1199,6 @@ function App() {
       // Store the local clock skew as client minus server so a positive value
       // means the client clock is ahead of the server clock.
       serverClockOffsetMsRef.current = Date.now() - estimatedServerTimeAtReceiveMs
-      console.log('clock sync sample', {
-        requestId: payload.requestId,
-        clientSentAtMs: payload.clientSentAtMs,
-        serverTimeMs: payload.serverTimeMs,
-        receivedAtMs,
-        roundTripMs,
-        bestClockSyncRttMs: bestClockSyncRttMsRef.current,
-        estimatedServerTimeAtReceiveMs,
-        clientClockOffsetMs: serverClockOffsetMsRef.current,
-      })
       syncGroupPlaybackDebugSnapshot({ serverClockOffsetMs: serverClockOffsetMsRef.current })
 
       if (waitingForInitialGroupClockSyncRef.current && groupCommandPendingRef.current === 'play') {
