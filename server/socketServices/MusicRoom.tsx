@@ -81,7 +81,6 @@ interface PendingPourIntent {
     startedAt: number;
     receivedAt: number;
     positionCol: number;
-    positionRow: number;
     compositionType: 'melodic' | 'drums';
     melodicComposition: NoteTransferData[];
     drumsComposition: NoteTransferData[];
@@ -103,6 +102,7 @@ Shared composition lifecycle (server authoritative):
 6. The server emits a full `musicGroupState` snapshot so clients stay in sync and can recover after reconnects.
 */
 export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
+    // ---------- Room and session state ----------
     private clients: MusicClientSocketService[] = [];
     // Authoritative in-room shared-composition groups.
     private musicGroups: MusicGroup[] = [];
@@ -123,6 +123,15 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         return session.loopEnabled && group.devices.length === 1;
     }
 
+    /**
+     * Clears any pre-armed next-column schedule pointers on a session.
+     */
+    private clearPendingNextScheduleState(session: GroupPlaybackSession): void {
+        session.pendingNextColumnIndex = null;
+        session.pendingNextScheduleToken = null;
+        session.pendingNextStartTimeMs = null;
+    }
+
     constructor(ioServer: Server, override virtualRoom: VirtualRoom = new VirtualRoom()) {
         super('', ioServer, virtualRoom, (clientSocket) => new MusicClientSocketService(clientSocket, virtualRoom));
         this.virtualRoom.movementManager?.configure(
@@ -134,7 +143,7 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         this.virtualRoom.addEventListener('snapDevices', this.handleSnapDevices.bind(this));
         this.virtualRoom.addEventListener('unSnapDevices', this.handleUnSnapDevices.bind(this));
         this.virtualRoom.addEventListener('removeDevice', this.handleRemoveDevice.bind(this));
-    
+
     }
 
     override addNewClient(clientSocket: Socket): MusicClientSocketService {
@@ -248,7 +257,6 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
             startedAt: payload.startedAt,
             receivedAt: nowMs,
             positionCol: sourcePosition.col,
-            positionRow: sourcePosition.row,
             compositionType: payload.compositionType,
             melodicComposition: payload.melodicComposition,
             drumsComposition: payload.drumsComposition,
@@ -293,6 +301,9 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         this.emitToGroup(sourceGroup, 'pourTransferResolved', transferPayload);
     }
 
+    /**
+     * Tears down transient coordination state when the room is destroyed.
+     */
     handleDestroy(): void {
         this.pendingPourIntentsByDeviceId.clear();
         this.pairExchangeLocksByKey.clear();
@@ -300,6 +311,10 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         this.emit('destroy', undefined);
     }
 
+    /**
+     * Handles a bidirectional snap relation and rebuilds group topology.
+     * Rolls back the latest edge if the resulting layout is invalid.
+     */
     handleSnapDevices({ event1, event2 }: SnapDevicesEvent): void {
         const device1 = event1.device as MusicDevice;
         const device2 = event2.device as MusicDevice;
@@ -311,7 +326,7 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         // interrupted before the topology mutation is applied.
         this.stopPlaybackForAffectedGroups(device1.musicGroup, device2.musicGroup);
 
-        
+
         if (!this.isValidOppositePair(event1.position, event2.position)) {
             // Reject invalid directional pairs and roll the edge back immediately.
             this.removePairSnapRelation(device1, device2);
@@ -333,15 +348,13 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
             this.emitMusicGroupState();
             return;
         }
-
-        //Send visual indications to clients that the snap was successful
+        // Send visual indications to clients that the snap was successful
         device1.client.snapBorder(event1);
         device2.client.snapBorder(event2);
 
-
         this.emitMusicGroupState();
     }
-    
+
     handleUnSnapDevices({ event1, event2 }: SnapDevicesEvent): void {
         const device1 = event1.device as MusicDevice;
         const device2 = event2.device as MusicDevice;
@@ -441,6 +454,10 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         });
     }
 
+    /**
+     * Rebuilds all groups from current snap edges and validates deterministic layout.
+     * Returns false when any malformed edge pair or layout conflict is detected.
+     */
     private rebuildGroupsFromCurrentSnaps(): boolean {
         // Snapshot previous ids so stable components can reuse their old group identity.
         const previousGroupByDeviceId = new Map<string, string | null>(
@@ -890,9 +907,7 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         session.pausedPositionMs = resumePositionMs;
         session.pauseRequestId = null;
         session.lastScheduledStartTimeMs = Date.now() + this.scheduleBufferMs;
-        session.pendingNextColumnIndex = null;
-        session.pendingNextScheduleToken = null;
-        session.pendingNextStartTimeMs = null;
+        this.clearPendingNextScheduleState(session);
 
         const schedulePayload: MusicGroupColumnScheduledPayload = {
             groupId: group.id,
@@ -938,9 +953,7 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         session.pauseRequestId = null;
         session.lastScheduledStartTimeMs = null;
         session.resetSequence += 1;
-        session.pendingNextColumnIndex = null;
-        session.pendingNextScheduleToken = null;
-        session.pendingNextStartTimeMs = null;
+        this.clearPendingNextScheduleState(session);
 
         const resetPayload: MusicGroupResetPayload = {
             groupId: group.id,
@@ -997,11 +1010,12 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         };
         this.emitToGroup(group, 'musicGroupCancelScheduledStart', cancelPayload);
 
-        session.pendingNextColumnIndex = null;
-        session.pendingNextScheduleToken = null;
-        session.pendingNextStartTimeMs = null;
+        this.clearPendingNextScheduleState(session);
     }
 
+    /**
+     * Pre-arms the next column schedule so clients can hand off seamlessly.
+     */
     private armFollowingColumn(
         group: MusicGroup,
         session: GroupPlaybackSession,
@@ -1194,7 +1208,7 @@ export class MusicRoom extends RoomSocketService<MusicClientSocketService> {
         }
 
         const expectedReceiverCol = giverIntent.positionCol + (giverIntent.direction === 'right' ? 1 : -1);
-        
+
         if (
             receiverIntent.positionCol !== expectedReceiverCol
         ) {
