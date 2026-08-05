@@ -90,6 +90,7 @@ const createVisualConfig = (theme: InstrumentTheme) => ({
  * Manages ghost-note input and note composition with conflict handling
  */
 export function NoteSpace({ progressRef, playbackState }: NoteSpaceProps) {
+  // ---------- Context state ----------
   //--- Context hooks ---//
   const { drawState } = ctx.useDrawState()
   const { clearSignal } = ctx.useClear()
@@ -122,9 +123,9 @@ export function NoteSpace({ progressRef, playbackState }: NoteSpaceProps) {
   // selectedNoteRef is the single source of truth for selection — never useState, to avoid
   // triggering p5 sketch remounts and React re-renders during pointer interactions.
   const selectedNoteRef = useRef<SelectionState | null>(null)
-  const tapDetectionRef = useRef<{ noteId: string; x: number; y: number; timestamp: number } | null>(null)
-  const playbackStateRef = useRef<1 | 2 | 0 | 'stop' | undefined>(playbackState)
+  const tapDetectionRef = useRef<{ x: number; y: number; timestamp: number } | null>(null)
 
+  // ---------- Canvas and interaction refs ----------
   //--- References ---//
   const containerRef = useRef<HTMLDivElement | null>(null)
   const p5Ref = useRef<P5Instance | null>(null)
@@ -166,13 +167,9 @@ export function NoteSpace({ progressRef, playbackState }: NoteSpaceProps) {
   }, [historyRef, setCompositionHistory])
 
   useEffect(() => {
-    playbackStateRef.current = playbackState
-  }, [playbackState])
-
-  useEffect(() => {
     // Cancel selection on any snap/unsnap gesture
     selectedNoteRef.current = null
-    if(lastCompositionUpdateTime === 0 || lastTimeSnapOrUnsnapContext === 0) return // Skip undo check on initial render
+    if (lastCompositionUpdateTime === 0 || lastTimeSnapOrUnsnapContext === 0) return // Skip undo check on initial render
     const difference = Math.abs(lastCompositionUpdateTime - lastTimeSnapOrUnsnapContext)
     if (difference < 50) {
       setUndo(true)
@@ -403,12 +400,7 @@ export function NoteSpace({ progressRef, playbackState }: NoteSpaceProps) {
         for (let i = 0; i < GRID_ROWS; i++) {
           const y = i * rowHeight
           p.noStroke()
-          // SUGGESTION: Playback active, use a slightly tinted background to indicate that notes are being played
-          // if (playbackStateRef.current === 1) { 
-          //   p.fill(255, 255, 220)
-          // } else {
-            p.fill(255, 255, 255)
-          // }
+          p.fill(255, 255, 255)
 
           p.rect(0, y, p.width, rowHeight)
 
@@ -723,7 +715,6 @@ export function NoteSpace({ progressRef, playbackState }: NoteSpaceProps) {
             // Start tap detection for single-tap selection
             drawGesture = null
             tapDetectionRef.current = {
-              noteId: noteUnderPointer.pitch + noteUnderPointer.startTime,
               x: p.mouseX,
               y: p.mouseY,
               timestamp: Date.now(),
@@ -881,7 +872,7 @@ export function NoteSpace({ progressRef, playbackState }: NoteSpaceProps) {
               const movedDistance = Math.hypot(deltaX, deltaY)
 
               // Single tap: enter selection mode (only if playback is paused or at 0)
-              if (movedDistance < LONG_PRESS_MOVE_TOLERANCE_PX) { //&& (playbackStateRef.current === 0 || !playbackStateRef.current)) {
+              if (movedDistance < LONG_PRESS_MOVE_TOLERANCE_PX) {
                 const sourceNote = pendingLongPressDrag.sourceNote
                 sketchSelectedNote = {
                   note: new Note(sourceNote.pitch, sourceNote.startTime, sourceNote.duration),
@@ -957,13 +948,13 @@ export function NoteSpace({ progressRef, playbackState }: NoteSpaceProps) {
 
     p5Ref.current = new p5(sketch)
 
-    //Handling canvas updates when the container is resized
+    // Handling canvas updates when the container is resized
     let resizeTimeout: NodeJS.Timeout;
     const resizeObserver = new ResizeObserver((entries) => {
       // Clear the previous resizing if an new one arrived immediately
       clearTimeout(resizeTimeout);
 
-      // Programm a resizing in 150ms
+      // Program a resize after a short debounce window.
       resizeTimeout = setTimeout(() => {
         for (let entry of entries) {
           const { width, height } = entry.contentRect;
