@@ -209,9 +209,11 @@ function App() {
       if (interaction.type === 'octaveChangeUp' && octave < 8) {
         setOctave((prev) => prev + 1)
         soundOctaveUp.play();
+        pausePlaybackSoloOrIfCurrentlyPlayingGroupPart()
       } else if (interaction.type === 'octaveChangeDown' && octave > 0) {
         setOctave((prev) => prev - 1)
         soundOctaveDown.play();
+        pausePlaybackSoloOrIfCurrentlyPlayingGroupPart()
       }
     })
 
