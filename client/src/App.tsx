@@ -110,6 +110,7 @@ type GroupControlCommand = 'play' | 'pause' | 'stop'
 const clampProgress = (value: number): number => Math.max(0, Math.min(1, value))
 
 function App() {
+  // ---------- Context state ----------
   // Context hooks for accessing and updating the global state
   const { instrument } = ctx.useInstrument()
   const { playback } = ctx.usePlayback()
@@ -123,11 +124,11 @@ function App() {
   const { octave } = ctx.useOctave()
   const { setOctave } = ctx.useUpdateOctave()
   const { requestClear } = ctx.useUpdateClear();
-  const { undo } = ctx.useUndo();
 
   // Context for tracking the last time a snap or unsnap event occurred, used to determine if an undo should be triggered after such events.
   const { setlastTimeSnapOrUnsnapContext } = simsnapctx.useUpdateLastTimeSnapOrUnsnapContext()
 
+  // ---------- Mutable refs (non-render state) ----------
   // Refs for tracking individual state variables of a device without triggering re-renders. These are used for playback and group synchronization logic.
   const progressRef = useRef<number>(0)
   const animFrameRef = useRef<number | null>(null)
@@ -140,9 +141,6 @@ function App() {
   const drumsCompositionRef = useRef<Note[]>(drumsComposition)
   const octaveRef = useRef<number>(octave)
 
-
-  soundOctaveDown.volume = Tone.getDestination().mute ? 0 : 0.1
-  soundOctaveUp.volume = Tone.getDestination().mute ? 0 : 0.1
 
   // Refs for tracking the local device's group context and shared playback state
   const selfGroupContextRef = useRef<SelfGroupContext>({ groupId: null, columnIndex: null, sharedBpm: null })
@@ -164,7 +162,7 @@ function App() {
   const hasSnappedNeighborRef = useRef<boolean>(false)
   const bpmSliderInteractionActiveRef = useRef<boolean>(false)
 
-
+  // ---------- Render state ----------
   const [snapBorders, setSnapBorders] = useState<SnapBorder[]>([])
   const [musicGroupState, setMusicGroupState] = useState<MusicGroupStatePayload | null>(null)
   const [connectedToServer, setConnectedToServer] = useState<boolean>(false)
@@ -189,17 +187,23 @@ function App() {
   // Refs and state for managing the octave change interaction
   const octaveTiltAnalyzerRef = useRef<OctaveChangeTiltAnalyzer | null>(null)
 
+  // ---------- Local mutable flags for callbacks ----------
   const groupCommandPendingRef = useRef<GroupControlCommand | null>(null)
   const loopEnabledLocalRef = useRef<boolean>(false)
   const groupedLoopEnabledRef = useRef<boolean>(false)
   const isOneColumnGroupRef = useRef<boolean>(false)
 
+  // ---------- Transport construction ----------
   const { constructComposition } = useSamplerTransport({
     instrumentRef,
     compositionRef,
     drumsCompositionRef,
     octaveRef,
   })
+
+  // Keep one-shot feedback sounds aligned with current mute state on each render.
+  soundOctaveDown.volume = Tone.getDestination().mute ? 0 : 0.1
+  soundOctaveUp.volume = Tone.getDestination().mute ? 0 : 0.1
 
   //Octave change tilt analyzer setup
   useEffect(() => {
@@ -332,7 +336,7 @@ function App() {
     }
     pausePlaybackSoloOrIfCurrentlyPlayingGroupPart()
 
-  }, [instrument, setPlayback])
+  }, [instrument])
 
   useEffect(() => {
     playbackRef.current = playback
@@ -484,6 +488,10 @@ function App() {
     }, 1000)
   }
 
+  /**
+   * Ensures the WebAudio context is unlocked and running before transport playback.
+   * Returns true when playback can safely start, otherwise false.
+   */
   const ensureAudioContextRunning = async (): Promise<boolean> => {
     try {
       await Tone.start()
@@ -509,7 +517,7 @@ function App() {
     Tone.getTransport().position = 0
     Tone.getTransport().cancel()
   }
-  
+
   const pausePlaybackSoloOrIfCurrentlyPlayingGroupPart = (): void => {
     if (isSupposedlyPlayingGroupedPart()) {
       if (!groupCommandPendingRef.current) {
@@ -570,6 +578,12 @@ function App() {
     animFrameRef.current = requestAnimationFrame(tick)
   }
 
+  /**
+   * Starts local Tone transport playback at a given BPM and timeline progress.
+   * @param targetBpm Playback BPM to apply.
+   * @param startProgress Progress ratio in [0, 1].
+   * @param onComplete Callback invoked when the composition reaches the end.
+   */
   const startTransportPlayback = async (
     targetBpm: number,
     startProgress: number,
@@ -718,6 +732,10 @@ function App() {
     ServerSocketService.Connection.emit('musicGroupColumnFinished', payload)
   }
 
+  /**
+   * Mirrors server-scheduled grouped playback for this device's active column.
+   * The server is authoritative for token/timing; clients only schedule local transport.
+   */
   const handleGroupedScheduledColumn = (payload: MusicGroupColumnScheduledPayload): void => {
     const selfContext = selfGroupContextRef.current
     if (payload.groupId !== selfContext.groupId) {
@@ -982,7 +1000,11 @@ function App() {
     setLoopEnabledLocal((previous) => !previous)
   }
 
-  const requestDeviceMotionPermission = async () => {
+  /**
+   * Requests motion permission on platforms that gate device sensors (iOS 13+).
+   * Returns true when device motion events are available for use.
+   */
+  const requestDeviceMotionPermission = async (): Promise<boolean> => {
     if (typeof (DeviceMotionEvent as any).requestPermission === 'function') {
       // iOS 13+ devices
       try {
@@ -1011,6 +1033,18 @@ function App() {
       setTiltDebugSnapshot(pourToCopyTiltAnalyzerRef.current?.getDebugSnapshot() ?? null)
     }
 
+    const getPourAttemptDirection = (): 'left' | 'right' | null => {
+      if (pourToCopyTiltAnalyzerRef.current?.isPouringRight()) {
+        return 'right'
+      }
+
+      if (pourToCopyTiltAnalyzerRef.current?.isPouringLeft()) {
+        return 'left'
+      }
+
+      return null
+    }
+
     const handleDeviceOrientation = (event: DeviceOrientationEvent) => {
       if (!hasSnappedNeighborRef.current) {
         setPourAttemptDirection(null)
@@ -1021,7 +1055,7 @@ function App() {
       processTiltEvent(event)
 
       // For visual feedback only
-      setPourAttemptDirection(pourToCopyTiltAnalyzerRef.current?.isPouringRight() ? 'right' : pourToCopyTiltAnalyzerRef.current?.isPouringLeft() ? 'left' : null)
+      setPourAttemptDirection(getPourAttemptDirection())
 
     }
 
@@ -1457,25 +1491,24 @@ function App() {
     >
 
       <ctx.DrawStateContextProvider>
-        
-          <ctx.SFXContextProvider>
-            <TopBar
-              volume={volume}
-              setVolume={setVolume}
-              displayedBpm={playbackBpm}
-              bpmSliderDisabled={isBpmSliderDisabled}
-              groupedControlsDisabled={isGrouped && !!groupCommandPending}
-              loopEnabled={loopEnabled}
-              onBpmEditBegin={beginGroupedBpmEdit}
-              onBpmChange={handleBpmChange}
-              onBpmEditEnd={endGroupedBpmEdit}
-              onPlayPause={handlePlayPause}
-              onStop={handleStop}
-              onToggleLoop={handleLoopToggle}
-            />
-            {instrument === Instrument.Drums ? <DrumSpace progressRef={progressRef} /> : <NoteSpace progressRef={progressRef} playbackState={playback} />}
 
-          </ctx.SFXContextProvider>
+        <ctx.SFXContextProvider>
+          <TopBar
+            volume={volume}
+            setVolume={setVolume}
+            displayedBpm={playbackBpm}
+            bpmSliderDisabled={isBpmSliderDisabled}
+            groupedControlsDisabled={isGrouped && !!groupCommandPending}
+            loopEnabled={loopEnabled}
+            onBpmEditBegin={beginGroupedBpmEdit}
+            onBpmChange={handleBpmChange}
+            onBpmEditEnd={endGroupedBpmEdit}
+            onPlayPause={handlePlayPause}
+            onStop={handleStop}
+            onToggleLoop={handleLoopToggle}
+          />
+          {instrument === Instrument.Drums ? <DrumSpace progressRef={progressRef} /> : <NoteSpace progressRef={progressRef} playbackState={playback} />}
+        </ctx.SFXContextProvider>
       </ctx.DrawStateContextProvider>
 
       {connectedToServer && snapBorders.map((border) => (
