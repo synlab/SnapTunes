@@ -20,6 +20,10 @@ const TRACKS: Track[] = [
 const STEPS = GRID_COLS
 const STEPS_PER_MEASURE = STEPS / 2
 
+/**
+ * Builds a boolean drum grid from note composition.
+ * Each row maps to a drum track, each column to a sequencer step.
+ */
 function initGrid(composition: Note[]): boolean[][] {
   const grid: boolean[][] = TRACKS.map(() => Array(STEPS).fill(false))
   if (composition && composition.length > 0) {
@@ -36,6 +40,9 @@ function initGrid(composition: Note[]): boolean[][] {
   return grid
 }
 
+/**
+ * Deep equality check for two drum grids to avoid unnecessary state updates.
+ */
 function gridsAreEqual(a: boolean[][], b: boolean[][]): boolean {
   if (a.length !== b.length) return false
 
@@ -53,13 +60,15 @@ function gridsAreEqual(a: boolean[][], b: boolean[][]): boolean {
 }
 
 export function DrumSpace({ progressRef }: DrumSpaceProps) {
-
+  // ---------- Context state ----------
   const { drumsComposition } = ctx.useDrumsComposition()
   const { setDrumsComposition } = ctx.useUpdateDrumsComposition()
   const { clearSignal } = ctx.useClear()
 
+  // ---------- Visual theme ----------
   const drumTheme = INSTRUMENT_THEMES[Instrument.Drums]
 
+  // ---------- Local UI and animation state ----------
   const [grid, setGrid] = useState<boolean[][]>(initGrid(drumsComposition))
   const [mouseDownStep, setMouseDownStep] = useState<boolean | null>(null)
   const [currentStep, setCurrentStep] = useState<number | null>(null)
@@ -105,7 +114,7 @@ export function DrumSpace({ progressRef }: DrumSpaceProps) {
 
   //Rebuild drums composition from boolean grid
   useEffect(() => {
-    let newComposition: Note[] = [];
+    const newComposition: Note[] = []
     for (let i = 0; i < grid.length; i++) {
       for (let j = 0; j < grid[i].length; j++) {
         if (grid[i][j]) {
@@ -113,9 +122,12 @@ export function DrumSpace({ progressRef }: DrumSpaceProps) {
         }
       }
     }
-    setDrumsComposition(newComposition);
+    setDrumsComposition(newComposition)
   }, [grid])
 
+  /**
+   * Toggles one grid step, or forces a specific value during click-drag paint.
+   */
   const toggleStep = (trackIdx: number, stepIdx: number, forceValue?: boolean): void => {
     setGrid((prev) => {
       const next = prev.map((row) => [...row])
@@ -138,6 +150,55 @@ export function DrumSpace({ progressRef }: DrumSpaceProps) {
   ): void => {
     if (event.buttons !== 1 || mouseDownStep === null) return
     toggleStep(trackIdx, stepIdx, mouseDownStep)
+  }
+
+  const getStepBackground = (
+    active: boolean,
+    isCurrentStep: boolean,
+    relativeStepIdx: number,
+    trackColor: string
+  ): string => {
+    if (isCurrentStep && active) {
+      return trackColor
+    }
+
+    if (isCurrentStep) {
+      return `rgb(${drumTheme.softRgb.join(', ')})`
+    }
+
+    if (active) {
+      return trackColor
+    }
+
+    return relativeStepIdx % 2 === 0 ? '#f0f0f0' : '#e4e4e4'
+  }
+
+  const renderStepCell = (
+    trackIdx: number,
+    absoluteIdx: number,
+    relativeStepIdx: number,
+    trackColor: string,
+    showOutlineOffset: boolean
+  ) => {
+    const active = grid[trackIdx][absoluteIdx]
+    const isCurrentStep = currentStep === absoluteIdx
+
+    return (
+      <div
+        key={relativeStepIdx}
+        onMouseDown={() => handleMouseDown(trackIdx, absoluteIdx)}
+        onMouseEnter={(event) => handleMouseEnter(trackIdx, absoluteIdx, event)}
+        style={{
+          borderRadius: '4px',
+          cursor: 'pointer',
+          background: getStepBackground(active, isCurrentStep, relativeStepIdx, trackColor),
+          ...(showOutlineOffset ? { outlineOffset: '-2px' } : {}),
+          boxShadow: active ? `0 0 6px ${trackColor}88` : 'none',
+          border: active ? `1px solid ${trackColor}` : `1px solid ${drumTheme.hex}`,
+          transition: 'background 0.08s, box-shadow 0.08s',
+        }}
+      />
+    )
   }
 
   return (
@@ -218,33 +279,7 @@ export function DrumSpace({ progressRef }: DrumSpaceProps) {
               }}
             >
               {Array.from({ length: STEPS_PER_MEASURE }).map((_, stepIdx) => {
-                const active = grid[trackIdx][stepIdx]
-                const isCurrentStep = currentStep === stepIdx
-                return (
-                  <div
-                    key={stepIdx}
-                    onMouseDown={() => handleMouseDown(trackIdx, stepIdx)}
-                    onMouseEnter={(event) => handleMouseEnter(trackIdx, stepIdx, event)}
-                    style={{
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      background:
-                        isCurrentStep && active
-                          ? track.color
-                          : isCurrentStep
-                            ? `rgb(${drumTheme.softRgb.join(', ')})`
-                            : active
-                              ? track.color
-                              : stepIdx % 2 === 0
-                                ? '#f0f0f0'
-                                : '#e4e4e4',
-                      outlineOffset: '-2px',
-                      boxShadow: active ? `0 0 6px ${track.color}88` : 'none',
-                      border: active ? `1px solid ${track.color}` : `1px solid ${drumTheme.hex}`,
-                      transition: 'background 0.08s, box-shadow 0.08s',
-                    }}
-                  />
-                )
+                return renderStepCell(trackIdx, stepIdx, stepIdx, track.color, true)
               })}
             </div>
 
@@ -268,32 +303,7 @@ export function DrumSpace({ progressRef }: DrumSpaceProps) {
             >
               {Array.from({ length: STEPS_PER_MEASURE }).map((_, stepIdx) => {
                 const absoluteIdx = stepIdx + STEPS_PER_MEASURE
-                const active = grid[trackIdx][absoluteIdx]
-                const isCurrentStep = currentStep === absoluteIdx
-                return (
-                  <div
-                    key={stepIdx}
-                    onMouseDown={() => handleMouseDown(trackIdx, absoluteIdx)}
-                    onMouseEnter={(event) => handleMouseEnter(trackIdx, absoluteIdx, event)}
-                    style={{
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      background:
-                        isCurrentStep && active
-                          ? track.color
-                          : isCurrentStep
-                            ? `rgb(${drumTheme.softRgb.join(', ')})`
-                            : active
-                              ? track.color
-                              : stepIdx % 2 === 0
-                                ? '#f0f0f0'
-                                : '#e4e4e4',
-                      boxShadow: active ? `0 0 6px ${track.color}88` : 'none',
-                      border: active ? `1px solid ${track.color}` : `1px solid ${drumTheme.hex}`,
-                      transition: 'background 0.08s, box-shadow 0.08s',
-                    }}
-                  />
-                )
+                return renderStepCell(trackIdx, absoluteIdx, stepIdx, track.color, false)
               })}
             </div>
           </div>
