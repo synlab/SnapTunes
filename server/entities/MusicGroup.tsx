@@ -1,6 +1,7 @@
 import { Position } from 'simsnap-core';
 import MusicDevice from "./MusicDevice";
 
+// ---------- Shared payload and state contracts ----------
 export interface GroupGridPosition {
     col: number;
     row: number;
@@ -123,6 +124,7 @@ export interface MusicGroupResetPayload {
 
 type DirectionalNeighbors = Partial<Record<Position, string>>;
 type RawCoord = { col: number; row: number };
+type ColumnRowItem = { device: MusicDevice; rawRow: number };
 
 export class MusicGroup  {
     private static nextGroupNumber = 1;
@@ -210,6 +212,10 @@ export class MusicGroup  {
         this.devices = [];
     }
 
+    /**
+     * Links two members with opposite directional edges.
+     * Returns false if either edge would conflict with existing adjacency.
+     */
     linkDevices(deviceA: MusicDevice, directionFromA: Position, deviceB: MusicDevice, directionFromB: Position): boolean {
         // Snap directions must be opposite on both devices (e.g. left<->right).
         if (MusicGroup.opposite(directionFromA) !== directionFromB) return false;
@@ -232,6 +238,10 @@ export class MusicGroup  {
         return true;
     }
 
+    /**
+     * Rebuilds deterministic [col,row] positions from the adjacency graph.
+     * Returns false when directional constraints are inconsistent.
+     */
     rebuildLayout(): boolean {
         this.gridByDeviceId.clear();
         this.devices = [];
@@ -240,15 +250,7 @@ export class MusicGroup  {
         if (members.length === 0) return true;
 
         // Stable traversal root keeps coordinate assignment deterministic across rebuilds.
-        const root = members.slice().sort((a, b) => {
-            const ax = a.pos?.x ?? 0;
-            const bx = b.pos?.x ?? 0;
-            if (ax !== bx) return ax - bx;
-            const ay = a.pos?.y ?? 0;
-            const by = b.pos?.y ?? 0;
-            if (ay !== by) return ay - by;
-            return a.id.value.localeCompare(b.id.value);
-        })[0];
+        const root = members.slice().sort(MusicGroup.compareDevicesForRootSort)[0];
 
         const queue: string[] = [root.id.value];
         const rawCoords: Map<string, RawCoord> = new Map<string, RawCoord>();
@@ -303,12 +305,12 @@ export class MusicGroup  {
 
         // Normalize to start from col 0 so the leftmost device column is always step index 0.
         const minCol = Math.min(...Array.from(rawCoords.values()).map((coord) => coord.col));
-        const rowsByCol: Map<number, Array<{ device: MusicDevice; rawRow: number }>> = new Map<number, Array<{ device: MusicDevice; rawRow: number }>>();
+        const rowsByCol: Map<number, ColumnRowItem[]> = new Map<number, ColumnRowItem[]>();
 
         rawCoords.forEach((coord, deviceId) => {
             const normalizedCol = coord.col - minCol;
-                const device = this.members.get(deviceId);
-                if (!device) return;
+            const device = this.members.get(deviceId);
+            if (!device) return;
             const list = rowsByCol.get(normalizedCol) ?? [];
             list.push({ device, rawRow: coord.row });
             rowsByCol.set(normalizedCol, list);
@@ -317,13 +319,7 @@ export class MusicGroup  {
         const maxCol = Math.max(...Array.from(rowsByCol.keys()));
         for (let col = 0; col <= maxCol; col++) {
             // Devices sharing a column play simultaneously; rows are ordered top-to-bottom.
-            const items = (rowsByCol.get(col) ?? []).sort((a, b) => {
-                if (a.rawRow !== b.rawRow) return a.rawRow - b.rawRow;
-                const ay = a.device.pos?.y ?? 0;
-                const by = b.device.pos?.y ?? 0;
-                if (ay !== by) return ay - by;
-                return a.device.id.value.localeCompare(b.device.id.value);
-            });
+            const items = (rowsByCol.get(col) ?? []).sort(MusicGroup.compareColumnItems);
 
             this.devices[col] = items.map((item, rowIndex) => {
                 const position: GroupGridPosition = { col, row: rowIndex };
@@ -342,11 +338,38 @@ export class MusicGroup  {
         return true;
     }
 
+    /**
+     * Returns the opposite direction for a snapped edge.
+     */
     static opposite(position: Position): Position {
         if (position === Position.left) return Position.right;
         if (position === Position.right) return Position.left;
         if (position === Position.top) return Position.bottom;
         return Position.top;
+    }
+
+    /**
+     * Stable sort used to choose a deterministic BFS root.
+     */
+    private static compareDevicesForRootSort(a: MusicDevice, b: MusicDevice): number {
+        const ax = a.pos?.x ?? 0;
+        const bx = b.pos?.x ?? 0;
+        if (ax !== bx) return ax - bx;
+        const ay = a.pos?.y ?? 0;
+        const by = b.pos?.y ?? 0;
+        if (ay !== by) return ay - by;
+        return a.id.value.localeCompare(b.id.value);
+    }
+
+    /**
+     * Stable row ordering for devices that share the same column.
+     */
+    private static compareColumnItems(a: ColumnRowItem, b: ColumnRowItem): number {
+        if (a.rawRow !== b.rawRow) return a.rawRow - b.rawRow;
+        const ay = a.device.pos?.y ?? 0;
+        const by = b.device.pos?.y ?? 0;
+        if (ay !== by) return ay - by;
+        return a.device.id.value.localeCompare(b.device.id.value);
     }
 
     private static delta(position: Position): RawCoord {
