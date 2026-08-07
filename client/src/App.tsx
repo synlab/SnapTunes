@@ -1554,7 +1554,6 @@ function App() {
         title="group playback"
         values={new Map<string, any>([
           ['group', groupPlaybackDebugSnapshot.groupId ?? 'none'],
-          ['column', groupPlaybackDebugSnapshot.columnIndex ?? 'n/a'],
           ['token', groupPlaybackDebugSnapshot.scheduleToken ?? 'n/a'],
           ['clock offset', `${Math.round(groupPlaybackDebugSnapshot.serverClockOffsetMs)} ms`],
         ])}
@@ -1567,8 +1566,7 @@ function App() {
           values={new Map<string, any>([
             ['alpha', tiltDebugSnapshot.latestRecord?.alpha?.toFixed(1) ?? 'n/a'],
             ['beta', tiltDebugSnapshot.latestRecord?.beta?.toFixed(1) ?? 'n/a'],
-            ['gamma', tiltDebugSnapshot.latestRecord?.gamma?.toFixed(1) ?? 'n/a'],
-            ['machines', tiltDebugSnapshot.machines]
+            ['gamma', tiltDebugSnapshot.latestRecord?.gamma?.toFixed(1) ?? 'n/a']
           ])}
           style={{ left: '8px', bottom: '8px', zIndex: 50 }}
         />
