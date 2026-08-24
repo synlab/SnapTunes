@@ -6,6 +6,10 @@ SnapTunes is a cross-device, co-located music production application designed fo
 The project is built on the SimSnap framework and developed as part of a research at the Synaesthetic Media Lab (SynLab), Toronto Metropolitan University. It investigates how tangible, cross-device interaction can lower the barrier to entry for group music-making, letting users without a musical background create together using simple, physical gestures rather than a traditional DAW interface.
 
 ## Setup Instructions
+0. **Check if `simsnap-core` has been published on npm.** If it hasn't been released yet, you'll need to set it up manually before continuing:
+   - Clone the [simsnap-core project](https://github.com/synlab/simsnap-core) into a parent folder
+   - Follow its setup instructions to install dependencies
+   - This same parent folder must be used to clone `snaptunes` in the next step, so both projects end up as sibling folders: `parent-folder/simsnap-core` and `parent-folder/snaptunes`
 1. Clone the repository
 2. Open a terminal in split view (two terminals)
 3. Install dependencies in both `client` and `server` folders
